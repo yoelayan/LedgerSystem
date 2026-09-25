@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint, format & types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+      - name: Ruff format
+        run: ruff format --diff .
+      - name: Mypy (domain + application, strict)
+        run: mypy
+
+  tests:
+    name: Tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ledger
+          POSTGRES_USER: ledger
+          POSTGRES_PASSWORD: ledger
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ledger"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_DB: ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Migrations are in sync with models
+        run: python manage.py makemigrations --check --dry-run
+      - name: Pytest
+        run: pytest
+      - name: Domain & application must be 100% covered
+        run: coverage report --include="ledger/domain/*,ledger/application/*" --fail-under=100
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  docker:
+    name: Docker Compose smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & start the stack
+        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: End-to-end smoke test
+        run: bash scripts/smoke_test.sh
+      - name: Concurrent approval demo
+        run: docker compose exec -T web python manage.py simulate_concurrent_approval
+      - name: Test suite inside the test image
+        run: docker compose --profile test run --rm tests pytest -q -p no:cacheprovider
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
