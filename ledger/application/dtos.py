@@ -15,7 +15,9 @@ _COMMAND_CONFIG = ConfigDict(frozen=True, extra="forbid")
 class RegisterBatchCommand(BaseModel):
     model_config = _COMMAND_CONFIG
 
-    reference: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    reference: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
+    ]
     submitted_by: ActorId
     content: bytes = Field(repr=False)
 

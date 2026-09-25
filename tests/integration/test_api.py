@@ -91,7 +91,9 @@ class TestDomainErrorsMapping:
     def test_self_approval_is_400(self, client: Client) -> None:
         batch_id = _pending(client)
 
-        response = _post_json(client, f"{BASE}/batches/{batch_id}/approve/", {"approver": SUBMITTER})
+        response = _post_json(
+            client, f"{BASE}/batches/{batch_id}/approve/", {"approver": SUBMITTER}
+        )
 
         _assert_problem(response, 400, "SELF_APPROVAL_FORBIDDEN")
 

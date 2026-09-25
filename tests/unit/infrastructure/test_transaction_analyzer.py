@@ -62,9 +62,16 @@ def test_empty_amount_is_only_reported_as_missing() -> None:
 
 
 def test_duplicates_flag_every_repetition_but_the_first() -> None:
-    rows = [make_row(1, external_id="A"), make_row(2, external_id="A"), make_row(3, external_id="A")]
+    rows = [
+        make_row(1, external_id="A"),
+        make_row(2, external_id="A"),
+        make_row(3, external_id="A"),
+    ]
 
-    assert _codes(rows) == [(2, IssueCode.DUPLICATE_EXTERNAL_ID), (3, IssueCode.DUPLICATE_EXTERNAL_ID)]
+    assert _codes(rows) == [
+        (2, IssueCode.DUPLICATE_EXTERNAL_ID),
+        (3, IssueCode.DUPLICATE_EXTERNAL_ID),
+    ]
 
 
 def test_a_row_can_break_several_rules() -> None:
@@ -93,7 +100,10 @@ def test_outlier_is_a_warning_and_does_not_block() -> None:
 
 def test_outliers_are_computed_per_currency() -> None:
     usd = [make_row(i, amount="100.00") for i in range(1, 6)]
-    eur = [make_row(i, amount=a, currency="EUR") for i, a in enumerate(["9000", "9100", "8900", "9050", "8950"], start=6)]
+    eur = [
+        make_row(i, amount=a, currency="EUR")
+        for i, a in enumerate(["9000", "9100", "8900", "9050", "8950"], start=6)
+    ]
 
     assert analyzer.analyze(usd + eur).issues == ()
 

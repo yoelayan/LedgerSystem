@@ -172,8 +172,8 @@ Content-Type: application/problem+json
 
 ```python
 with transaction.atomic():
-    batch = repository.get_for_update(batch_id)   # SELECT ... FOR UPDATE
-    batch.approve(approver=..., now=...)          # reglas + máquina de estados
+    batch = repository.get_for_update(batch_id)  # SELECT ... FOR UPDATE
+    batch.approve(approver=..., now=...)  # reglas + máquina de estados
     repository.save(batch)
 ```
 
