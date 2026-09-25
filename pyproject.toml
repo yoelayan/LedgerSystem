@@ -1,0 +1,64 @@
+[project]
+name = "ledger-system"
+version = "1.0.0"
+description = "Financial transaction batch processing & approval - a pragmatic DDD reference project."
+requires-python = ">=3.12"
+readme = "README.md"
+
+# Runtime / dev dependencies are pinned in requirements*.txt so Docker and CI share them.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["**/migrations/**"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "B", "UP", "SIM", "C4", "RET", "RUF", "PT", "DJ",
+    "BLE", # blind `except Exception` is forbidden project-wide
+    "TRY",
+]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "TRY003", # domain exceptions carry descriptive messages on purpose
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ledger", "config", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["TRY"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["ledger/domain", "ledger/application"]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["statemachine.*", "django.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["ledger.domain.state_machine"]
+disallow_subclassing_any = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --cov=ledger --cov-report=term-missing --cov-report=xml"
+
+[tool.coverage.run]
+branch = true
+source = ["ledger"]
+omit = ["*/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 90
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "class .*\\(Protocol\\):",
+]
