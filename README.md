@@ -308,6 +308,10 @@ Abre `http://localhost:8000` y entra con uno de los usuarios de demo: `alice`, `
 
 - **Lotes**: listado con filtro por estado.
 - **Subir CSV**: sube el archivo y lo analiza al momento. Prueba con `samples/banco_es.csv`, que usa `;`, cabeceras en español, importes `1.250,00` y fechas `01/09/2026`.
+  Para probar con volumen:
+  - `samples/lote_5000.csv`: 5000 transacciones limpias en EUR, USD, MXN y COP. Llega a *pendiente de aprobación* con unos pocos importes atípicos como aviso.
+  - `samples/lote_5000_con_errores.csv`: el mismo lote con 25 filas problemáticas (importe, divisa, fecha, cuenta vacía y referencia duplicada). Se rechaza automáticamente con todos los problemas listados.
+  - Los genera `scripts/generate_sample_batch.py`, con semilla fija; admite `--rows`, `--errors` y `--outliers`.
 - **Detalle**: resumen y totales por divisa, las **columnas identificadas** con su confianza y el formato convertido, los problemas encontrados y las transacciones (filas con error o aviso resaltadas; bajo cada importe o fecha convertido, el valor original).
 - **Aprobar / Rechazar**: el actor es siempre el usuario con sesión iniciada. Quien sube un lote no puede aprobarlo (el botón aparece desactivado y el dominio lo rechaza igualmente). Rechazar exige motivo.
 
