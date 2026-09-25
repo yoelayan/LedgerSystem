@@ -5,6 +5,8 @@
 ![Django](https://img.shields.io/badge/django-5.2_LTS-0C4B33)
 ![Pydantic](https://img.shields.io/badge/pydantic-v2-E92063)
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/yoelayan/LedgerSystem?quickstart=1)
+
 Proyecto de referencia que muestra cómo construir un servicio financiero **correcto bajo concurrencia**, con **DDD pragmático**, **errores explícitos** y **fail-fast**, usando Django como API REST, Pydantic v2, pandas y python-statemachine.
 
 Un usuario sube un CSV de transacciones. El sistema lo analiza con pandas (importes, duplicados, divisas, fechas y anomalías estadísticas) y lo lleva por un ciclo de vida controlado por una máquina de estados hasta que un **segundo** usuario lo aprueba o lo rechaza.
@@ -251,6 +253,21 @@ Prueba rápida (requiere `curl` y `jq`; en Windows funciona desde Git Bash):
 
 ```bash
 bash scripts/smoke_test.sh
+```
+
+### Probarlo en GitHub Codespaces (sin instalar nada)
+
+El repo incluye un `.devcontainer/`, así que puedes tener un entorno funcionando directamente en GitHub:
+
+1. Pulsa el botón **Open in GitHub Codespaces** de arriba (o *Code → Codespaces → Create codespace*).
+2. Al arrancar, el codespace ejecuta `docker compose up` solo: PostgreSQL + API ya migrada en el puerto `8000`.
+3. En la pestaña **Ports** tienes la URL pública de la API (`https://<tu-codespace>-8000.app.github.dev/api/v1/health/`). Si quieres llamarla desde fuera del navegador (Postman, curl en tu máquina), cambia la visibilidad del puerto a *Public*.
+4. Desde la terminal del codespace puedes lanzar todo tal cual:
+
+```bash
+bash scripts/smoke_test.sh
+docker compose exec web python manage.py simulate_concurrent_approval
+docker compose --profile test run --rm tests
 ```
 
 ## 7. API
