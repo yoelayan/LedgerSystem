@@ -37,7 +37,8 @@ def _pending(client: Client) -> str:
 def _assert_problem(response: Any, status: int, code: str) -> dict[str, Any]:
     assert response.status_code == status
     assert response["Content-Type"] == PROBLEM_CONTENT_TYPE
-    body: dict[str, Any] = response.json()
+    # json.loads instead of response.json(): the latter only exists on test-client responses.
+    body: dict[str, Any] = json.loads(response.content)
     assert body["status"] == status
     assert body["code"] == code
     return body

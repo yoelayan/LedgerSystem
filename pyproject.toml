@@ -28,6 +28,9 @@ known-first-party = ["ledger", "config", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TRY"]
+# Django's declarative class attributes (Meta.ordering, http_method_names) are idiomatic lists.
+"ledger/infrastructure/models.py" = ["RUF012"]
+"ledger/presentation/api/views.py" = ["RUF012"]
 
 [tool.mypy]
 python_version = "3.12"

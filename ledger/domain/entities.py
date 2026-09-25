@@ -8,7 +8,11 @@ from uuid import UUID, uuid4
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from statemachine.exceptions import TransitionNotAllowed
 
-from ledger.domain.exceptions import BatchTooLargeError, EmptyBatchError, InvalidStateTransitionError
+from ledger.domain.exceptions import (
+    BatchTooLargeError,
+    EmptyBatchError,
+    InvalidStateTransitionError,
+)
 from ledger.domain.state_machine import BatchLifecycle
 from ledger.domain.value_objects import (
     MAX_ROWS_PER_BATCH,

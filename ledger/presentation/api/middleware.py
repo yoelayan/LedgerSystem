@@ -14,7 +14,7 @@ from typing import Final
 from django.http import HttpRequest, HttpResponse
 
 from ledger.domain.exceptions import (
-    BusinessRuleViolation,
+    BusinessRuleError,
     ConflictError,
     DomainError,
     NotFoundError,
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 STATUS_BY_ERROR_CATEGORY: Final[dict[type[Exception], HTTPStatus]] = {
     NotFoundError: HTTPStatus.NOT_FOUND,
     ConflictError: HTTPStatus.CONFLICT,
-    BusinessRuleViolation: HTTPStatus.BAD_REQUEST,
+    BusinessRuleError: HTTPStatus.BAD_REQUEST,
     RequestValidationError: HTTPStatus.BAD_REQUEST,
 }
 

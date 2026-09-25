@@ -122,14 +122,14 @@ classDiagram
     Exception <|-- DomainError
     DomainError <|-- NotFoundError
     DomainError <|-- ConflictError
-    DomainError <|-- BusinessRuleViolation
+    DomainError <|-- BusinessRuleError
     NotFoundError <|-- BatchNotFoundError
     ConflictError <|-- InvalidStateTransitionError
-    BusinessRuleViolation <|-- SelfApprovalError
-    BusinessRuleViolation <|-- RejectionReasonRequiredError
-    BusinessRuleViolation <|-- EmptyBatchError
-    BusinessRuleViolation <|-- BatchTooLargeError
-    BusinessRuleViolation <|-- MalformedDatasetError
+    BusinessRuleError <|-- SelfApprovalError
+    BusinessRuleError <|-- RejectionReasonRequiredError
+    BusinessRuleError <|-- EmptyBatchError
+    BusinessRuleError <|-- BatchTooLargeError
+    BusinessRuleError <|-- MalformedDatasetError
 ```
 
 **Principios:**
@@ -141,7 +141,7 @@ classDiagram
    |---|---|
    | `NotFoundError` | 404 |
    | `ConflictError` | 409 |
-   | `BusinessRuleViolation` | 400 |
+   | `BusinessRuleError` | 400 |
    | `RequestValidationError` (capa de presentación) | 400 |
 
    Un error nuevo hereda su código HTTP sin tocar el middleware. Un test comprueba que todo error concreto pertenece a una sola categoría y tiene un `code` único.

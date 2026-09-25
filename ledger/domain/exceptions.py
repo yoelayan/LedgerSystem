@@ -1,7 +1,7 @@
 """Explicit domain exceptions.
 
 Every business-rule violation has its own exception type. Concrete errors inherit from
-exactly one *category* (NotFound, Conflict, BusinessRuleViolation); the presentation layer
+exactly one *category* (NotFound, Conflict, BusinessRuleError); the presentation layer
 maps categories to HTTP status codes, so the domain stays ignorant of HTTP.
 
 `DomainError` itself is never raised: an unmapped error is a programming bug and must
@@ -31,7 +31,7 @@ class ConflictError(DomainError):
     """The request conflicts with the current state of the aggregate."""
 
 
-class BusinessRuleViolation(DomainError):
+class BusinessRuleError(DomainError):
     """The request breaks a business invariant regardless of the current state."""
 
 
@@ -54,7 +54,7 @@ class InvalidStateTransitionError(ConflictError):
         )
 
 
-class SelfApprovalError(BusinessRuleViolation):
+class SelfApprovalError(BusinessRuleError):
     """Four-eyes principle: whoever submits a batch cannot approve it."""
 
     code = "SELF_APPROVAL_FORBIDDEN"
@@ -67,7 +67,7 @@ class SelfApprovalError(BusinessRuleViolation):
         )
 
 
-class RejectionReasonRequiredError(BusinessRuleViolation):
+class RejectionReasonRequiredError(BusinessRuleError):
     code = "REJECTION_REASON_REQUIRED"
 
     def __init__(self, batch_id: UUID) -> None:
@@ -76,14 +76,14 @@ class RejectionReasonRequiredError(BusinessRuleViolation):
         )
 
 
-class EmptyBatchError(BusinessRuleViolation):
+class EmptyBatchError(BusinessRuleError):
     code = "EMPTY_BATCH"
 
     def __init__(self) -> None:
         super().__init__("A batch must contain at least one transaction.")
 
 
-class BatchTooLargeError(BusinessRuleViolation):
+class BatchTooLargeError(BusinessRuleError):
     code = "BATCH_TOO_LARGE"
 
     def __init__(self, row_count: int, max_rows: int) -> None:
@@ -94,7 +94,7 @@ class BatchTooLargeError(BusinessRuleViolation):
         )
 
 
-class MalformedDatasetError(BusinessRuleViolation):
+class MalformedDatasetError(BusinessRuleError):
     """The uploaded file cannot be interpreted as a transaction dataset at all."""
 
     code = "MALFORMED_DATASET"

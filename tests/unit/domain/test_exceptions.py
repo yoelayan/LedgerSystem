@@ -6,13 +6,13 @@ import pytest
 
 from ledger.domain import exceptions as exc
 from ledger.domain.exceptions import (
-    BusinessRuleViolation,
+    BusinessRuleError,
     ConflictError,
     DomainError,
     NotFoundError,
 )
 
-CATEGORIES = (NotFoundError, ConflictError, BusinessRuleViolation)
+CATEGORIES = (NotFoundError, ConflictError, BusinessRuleError)
 
 
 def _concrete_errors() -> list[type[DomainError]]:
