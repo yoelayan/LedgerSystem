@@ -15,6 +15,8 @@ Un usuario sube un CSV de transacciones desde la **web** (o la API). Un pequeño
 
 ## Índice
 
+- [Casos de uso](#casos-de-uso)
+
 1. [Dominio y ciclo de vida](#1-dominio-y-ciclo-de-vida)
 2. [Arquitectura](#2-arquitectura)
 3. [Diseño de excepciones](#3-diseño-de-excepciones)
@@ -27,6 +29,57 @@ Un usuario sube un CSV de transacciones desde la **web** (o la API). Un pequeño
 7. [API](#7-api)
 8. [Tests y CI](#8-tests-y-ci)
 9. [Decisiones y trade-offs](#9-decisiones-y-trade-offs)
+
+---
+
+## Casos de uso
+
+LedgerSystem es la **puerta de control entre "alguien preparó un lote de movimientos" y "ese lote se ejecuta"**. Revisa el archivo automáticamente, deja la decisión a una segunda persona y guarda quién decidió qué. No ejecuta pagos ni se conecta a bancos: valida y aprueba lo que otro sistema ejecutará.
+
+Leyenda: ✅ funciona hoy · 🔧 encaja con el diseño, pero necesita una ampliación (se indica cuál).
+
+### Validación y control de lotes
+
+| # | Caso de uso | Estado | Qué lo hace posible |
+|---|---|---|---|
+| 1 | **Verificación automática de integridad antes de enviar un lote a otro sistema financiero** (banco, ERP, pasarela de pagos) | ✅ validación · 🔧 integración | Cada lote pasa por las mismas reglas: importes, divisas, fechas, campos vacíos, IDs duplicados y atípicos. La API REST permite que otro sistema envíe lotes y consulte el resultado. **Para integrarlo en producción faltan** autenticación en la API y un aviso (webhook) cuando un lote se aprueba. |
+| 2 | **Revisión de remesas de pagos a proveedores** con el principio de los cuatro ojos | ✅ | Quien sube no aprueba: lo exige el dominio y también la base de datos (`CHECK`). Rechazar exige motivo. |
+| 3 | **Revisión de nóminas** antes de mandarlas al banco | ✅ | Detecta cuentas vacías, transacciones duplicadas (misma referencia) e importes fuera de lo normal, como un cero de más. |
+| 4 | **Pagos masivos multidivisa** | ✅ | Totales por divisa con `Decimal` (sin errores de redondeo) y lista de divisas admitidas. Los atípicos se calculan por divisa: 3.500.000 COP no es raro, 3.500.000 EUR sí. |
+| 5 | **Detección de pagos duplicados** | ✅ dentro del lote · 🔧 entre lotes | Un `external_id` repetido bloquea el lote. Detectar que un pago ya se aprobó en un lote anterior requiere guardar las transacciones en una tabla consultable (hoy van en JSONB por lote). |
+| 6 | **Detección de errores de tecleo e importes sospechosos** | ✅ | Puntuación z robusta (mediana/MAD) por divisa: un importe desproporcionado se marca como aviso para el aprobador, sin bloquear. |
+| 7 | **Revisión de devoluciones o reembolsos masivos** (e-commerce, seguros) | ✅ | Mismo flujo que un pago: el lote se valida y lo aprueba alguien distinto de quien lo preparó. |
+
+### Volumen y datos heterogéneos
+
+| # | Caso de uso | Estado | Qué lo hace posible |
+|---|---|---|---|
+| 8 | **Revisión de lotes grandes de movimientos** | ✅ hasta 10.000 filas · 🔧 análisis entre lotes | Un lote de 5.000 filas se sube y analiza en 1–2 s (ver `samples/lote_5000.csv`). Es una **revisión de validez de cada lote, no un estudio analítico**: no hay tendencias, comparativas entre periodos ni consultas sobre el histórico. Eso pediría una tabla de transacciones y un módulo de análisis. Para más de 10.000 filas, el análisis debería pasar a una tarea asíncrona (Celery/RQ). |
+| 9 | **Unificar exportaciones de distintos bancos o ERPs** | ✅ | Cada exportación trae sus propias cabeceras, separadores y formatos (`Importe`/`Amount`, `;`/`,`, `1.250,50`/`1,250.50`, `DD/MM/AAAA`). El modelo de columnas y la normalización los llevan a un formato común, y se ve qué se interpretó. |
+| 10 | **Validación de datos en una migración entre sistemas** | ✅ | Antes de cargar movimientos de un sistema antiguo en uno nuevo: el lote se rechaza con **todos** los errores listados, no solo el primero, para corregirlos de una vez. |
+| 11 | **Pre-validación de archivos que suben clientes** (fintech, pasarela de pagos masivos) | ✅ validación · 🔧 multi-cliente | El cliente recibe al momento los errores de cada fila (en el informe del lote, también por la API en JSON) en lugar de un rechazo del banco días después. Para varios clientes faltan autenticación y separación de datos por cliente. |
+
+### Control interno, auditoría y reportes
+
+| # | Caso de uso | Estado | Qué lo hace posible |
+|---|---|---|---|
+| 12 | **Segregación de funciones para control interno** (p. ej. controles tipo SOX) | ✅ | La regla de que quien prepara no aprueba no depende de la interfaz: la aplica el dominio y la repite la base de datos. |
+| 13 | **Trazabilidad para auditoría** | ✅ por lote · 🔧 bitácora completa | Cada lote guarda quién lo subió, quién decidió, cuándo y el motivo del rechazo, cómo se interpretaron las columnas y los valores originales antes de normalizarlos. Una bitácora de *todos* los eventos (quién vio o procesó qué) sería una tabla de eventos adicional. |
+| 14 | **Varios aprobadores trabajando a la vez** (equipos de tesorería) | ✅ | Si dos personas aprueban o rechazan el mismo lote simultáneamente, solo una gana y la otra recibe un aviso claro (bloqueo `SELECT ... FOR UPDATE`, probado con tests de concurrencia). |
+| 15 | **Informes** | ✅ informe por lote · 🔧 exportación y reportes agregados | Hoy cada lote tiene su **informe de validación**: filas válidas, totales por divisa, errores y avisos por fila, en la web y en JSON por la API. **No hay** exportación a PDF/Excel ni reportes que agreguen varios lotes (por ejemplo, lo aprobado por mes y divisa). Añadirlos es directo a partir de los datos guardados. |
+
+### Aprendizaje
+
+| # | Caso de uso | Estado | Qué lo hace posible |
+|---|---|---|---|
+| 16 | **Proyecto de referencia para equipos de desarrollo** | ✅ | Muestra con código y tests cómo se resuelven problemas reales: DDD con capas verificadas por tests, máquina de estados, errores con código estable, concurrencia con bloqueo pesimista y análisis de datos sin `float` para el dinero. |
+
+### Lo que el sistema **no** hace (y no debería prometerse)
+
+- **Ejecutar pagos** o conectarse a bancos: aprueba lotes que otro sistema ejecutará.
+- **Conciliación bancaria**: no cruza los movimientos con un extracto.
+- **Prevención de fraude o blanqueo (AML)**: la detección de atípicos avisa de importes raros dentro de un lote; no es un sistema de riesgo.
+- **Contabilidad**: no genera asientos ni lleva saldos.
 
 ---
 
