@@ -3,6 +3,8 @@ x-app-env: &app-env
   DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me}
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+  DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+  DEMO_USERS_PASSWORD: ${DEMO_USERS_PASSWORD:-demo1234}
   POSTGRES_DB: ${POSTGRES_DB:-ledger}
   POSTGRES_USER: ${POSTGRES_USER:-ledger}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledger}
@@ -31,6 +33,7 @@ services:
     environment: *app-env
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py create_demo_users &&
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile -"
     ports:
       - "8000:8000"

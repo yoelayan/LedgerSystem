@@ -1,0 +1,30 @@
+{% extends "web/base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 420px; margin: 40px auto;">
+  <h1>Entrar</h1>
+  {% if form.non_field_errors %}
+    <ul class="messages"><li class="error">Usuario o contraseña incorrectos.</li></ul>
+  {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    <p>
+      <label for="id_username">Usuario</label>
+      <input type="text" name="username" id="id_username" autocomplete="username" required autofocus
+             value="{{ form.username.value|default_if_none:'' }}">
+    </p>
+    <p>
+      <label for="id_password">Contraseña</label>
+      <input type="password" name="password" id="id_password" autocomplete="current-password" required>
+    </p>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button class="btn primary" type="submit">Entrar</button>
+  </form>
+  {% if demo_users %}
+    <p class="muted" style="margin-top: 20px;">
+      Entorno de demo: usuarios {% for u in demo_users %}<code>{{ u }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}
+      (la contraseña está en <code>DEMO_USERS_PASSWORD</code>; por defecto <code>demo1234</code>).
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

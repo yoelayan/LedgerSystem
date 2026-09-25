@@ -3,7 +3,15 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from ledger.domain.value_objects import AnalysisIssue, AnalysisReport, IssueCode, Severity
+from ledger.domain.value_objects import (
+    AnalysisIssue,
+    AnalysisReport,
+    ColumnMapping,
+    ColumnMatch,
+    IssueCode,
+    MatchMethod,
+    Severity,
+)
 
 
 def _issue(severity: Severity) -> AnalysisIssue:
@@ -44,3 +52,25 @@ def test_report_is_immutable() -> None:
 
     with pytest.raises(ValidationError):
         report.total_rows = 5  # type: ignore[misc]
+
+
+class TestColumnMapping:
+    mapping = ColumnMapping(
+        matches=(
+            ColumnMatch(
+                field="amount", source_column="Importe", method=MatchMethod.VOCABULARY, confidence=1
+            ),
+        ),
+        ignored_columns=("Concepto",),
+    )
+
+    def test_column_for(self) -> None:
+        assert self.mapping.column_for("amount") == "Importe"
+        assert self.mapping.column_for("currency") is None
+
+    def test_missing_fields_keep_the_canonical_order(self) -> None:
+        assert self.mapping.missing_fields == ("external_id", "account", "currency", "value_date")
+
+    def test_confidence_is_a_ratio(self) -> None:
+        with pytest.raises(ValidationError):
+            ColumnMatch(field="amount", source_column="x", method=MatchMethod.CONTENT, confidence=2)

@@ -49,6 +49,9 @@ def _to_fields(batch: Batch) -> dict[str, Any]:
         "created_by": batch.created_by,
         "created_at": batch.created_at,
         "source_rows": [row.model_dump(mode="json") for row in batch.rows],
+        "column_mapping": (
+            batch.column_mapping.model_dump(mode="json") if batch.column_mapping else None
+        ),
         "analysis_report": batch.analysis.model_dump(mode="json") if batch.analysis else None,
         "decided_by": batch.decided_by,
         "decided_at": batch.decided_at,
@@ -65,6 +68,7 @@ def _to_entity(model: BatchModel) -> Batch:
             "created_by": model.created_by,
             "created_at": model.created_at,
             "rows": model.source_rows,
+            "column_mapping": model.column_mapping,
             "analysis": model.analysis_report,
             "decided_by": model.decided_by,
             "decided_at": model.decided_at,

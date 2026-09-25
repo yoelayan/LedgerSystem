@@ -19,6 +19,7 @@ class BatchModel(models.Model):
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, db_index=True)
     created_by = models.CharField(max_length=64)
     source_rows = models.JSONField()
+    column_mapping = models.JSONField(null=True, blank=True)
     analysis_report = models.JSONField(null=True, blank=True)
     decided_by = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
     decided_at = models.DateTimeField(null=True, blank=True)

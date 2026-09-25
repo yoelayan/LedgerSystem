@@ -154,3 +154,13 @@ def test_list_batches(service: BatchService) -> None:
     second = _register(service)
 
     assert {b.id for b in service.list_batches()} == {first, second}
+
+
+def test_detail_includes_rows_and_column_mapping(service: BatchService) -> None:
+    batch_id = _register(service)
+
+    detail = service.get_batch_detail(batch_id)
+
+    assert [row.external_id for row in detail.rows] == ["TX-1", "TX-2", "TX-3"]
+    assert detail.column_mapping is not None
+    assert detail.column_mapping.column_for("currency") == "currency"

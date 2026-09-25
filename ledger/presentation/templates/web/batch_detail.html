@@ -1,0 +1,123 @@
+{% extends "web/base.html" %}
+{% load ledger_ui %}
+{% block title %}{{ batch.reference }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'web:batch-list' %}">← Lotes</a></p>
+<h1>{{ batch.reference }} <span class="badge {{ batch.status }}">{{ batch.status|label:status_labels }}</span></h1>
+
+<div class="grid">
+  <section class="card">
+    <h2>Resumen</h2>
+    <dl class="kv">
+      <dt>Subido por</dt><dd>{{ batch.created_by }} · {{ batch.created_at|date:"d/m/Y H:i" }}</dd>
+      <dt>Filas</dt><dd>{{ batch.row_count }}</dd>
+      {% if batch.analysis %}
+        <dt>Filas válidas</dt><dd>{{ batch.analysis.valid_rows }} de {{ batch.analysis.total_rows }}</dd>
+        {% for currency, total in batch.analysis.totals_by_currency.items %}
+          <dt>Total {{ currency }}</dt><dd>{{ total }}</dd>
+        {% endfor %}
+      {% endif %}
+      {% if batch.decided_by %}
+        <dt>Decidido por</dt><dd>{{ batch.decided_by }} · {{ batch.decided_at|date:"d/m/Y H:i" }}</dd>
+      {% endif %}
+      {% if batch.rejection_reason %}
+        <dt>Motivo</dt><dd>{{ batch.rejection_reason }}</dd>
+      {% endif %}
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Acciones</h2>
+    {% if batch.status == "DRAFT" %}
+      <form method="post" action="{% url 'web:batch-process' batch.id %}">
+        {% csrf_token %}<button class="btn primary" type="submit">Analizar</button>
+      </form>
+    {% elif can_decide %}
+      <div class="actions">
+        <form method="post" action="{% url 'web:batch-approve' batch.id %}">
+          {% csrf_token %}
+          <button class="btn primary" type="submit" {% if is_owner %}disabled{% endif %}>Aprobar</button>
+        </form>
+      </div>
+      {% if is_owner %}
+        <p class="muted">Lo subiste tú: otra persona debe aprobarlo (regla de los cuatro ojos).</p>
+      {% endif %}
+      <form method="post" action="{% url 'web:batch-reject' batch.id %}" style="margin-top: 16px;">
+        {% csrf_token %}
+        <p>
+          <label for="id_reason">Motivo del rechazo</label>
+          <textarea name="reason" id="id_reason" maxlength="1000" required></textarea>
+        </p>
+        <button class="btn danger" type="submit">Rechazar</button>
+      </form>
+    {% else %}
+      <p class="muted">Este lote ya no admite acciones.</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if batch.column_mapping %}
+<section class="card table-scroll">
+  <h2>Columnas identificadas</h2>
+  <table>
+    <thead><tr><th>Campo</th><th>Columna del archivo</th><th>Cómo se identificó</th><th>Confianza</th><th>Formato convertido</th></tr></thead>
+    <tbody>
+      {% for m in batch.column_mapping.matches %}
+        <tr>
+          <td>{{ m.field|label:field_labels }}</td>
+          <td><code>{{ m.source_column }}</code></td>
+          <td>{{ m.method|label:method_labels }}</td>
+          <td><span class="meter"><span style="width: {{ m.confidence|percent }}"></span></span>{{ m.confidence|percent }}</td>
+          <td>
+            {% if m.value_format %}
+              <code>{{ m.value_format }}</code>
+              {% if m.format_ambiguous %}
+                <span class="badge warn" title="Todas las fechas encajan tanto en día/mes como en mes/día">Ambiguo: se asumió día/mes</span>
+              {% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if batch.column_mapping.ignored_columns %}
+    <p class="muted">Columnas ignoradas: {% for c in batch.column_mapping.ignored_columns %}<code>{{ c }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if errors or warnings %}
+<section class="card table-scroll">
+  <h2>Problemas encontrados</h2>
+  <table>
+    <thead><tr><th>Fila</th><th>Tipo</th><th>Detalle</th></tr></thead>
+    <tbody>
+      {% for issue in errors %}
+        <tr><td class="num">{{ issue.row_number }}</td><td><span class="badge err">{{ issue.code|label:issue_labels }}</span></td><td>{{ issue.message }}</td></tr>
+      {% endfor %}
+      {% for issue in warnings %}
+        <tr><td class="num">{{ issue.row_number }}</td><td><span class="badge warn">{{ issue.code|label:issue_labels }}</span></td><td>{{ issue.message }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="card table-scroll">
+  <h2>Transacciones</h2>
+  <table>
+    <thead><tr><th class="num">#</th><th>ID</th><th>Cuenta</th><th class="num">Importe</th><th>Divisa</th><th>Fecha valor</th></tr></thead>
+    <tbody>
+      {% for row, severity in rows %}
+        <tr class="{{ severity }}">
+          <td class="num">{{ row.row_number }}</td><td>{{ row.external_id }}</td><td>{{ row.account }}</td>
+          <td class="num">{{ row.amount }}{% if row.original_values.amount %}<br><small class="muted" title="Valor en el archivo">{{ row.original_values.amount }}</small>{% endif %}</td>
+          <td>{{ row.currency }}</td>
+          <td>{{ row.value_date }}{% if row.original_values.value_date %}<br><small class="muted" title="Valor en el archivo">{{ row.original_values.value_date }}</small>{% endif %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if hidden_rows %}<p class="muted">Se muestran las primeras {{ preview_limit }} filas; {{ hidden_rows }} más no se muestran.</p>{% endif %}
+</section>
+{% endblock %}

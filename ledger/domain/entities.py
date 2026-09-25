@@ -20,6 +20,7 @@ from ledger.domain.value_objects import (
     ActorId,
     AnalysisReport,
     BatchStatus,
+    ColumnMapping,
     RawTransactionRow,
 )
 
@@ -38,6 +39,7 @@ class Batch(BaseModel):
     created_by: ActorId
     created_at: AwareDatetime
     rows: tuple[RawTransactionRow, ...]
+    column_mapping: ColumnMapping | None = None
     status: BatchStatus = BatchStatus.DRAFT
     analysis: AnalysisReport | None = None
     decided_by: ActorId | None = None
@@ -52,6 +54,7 @@ class Batch(BaseModel):
         created_by: str,
         rows: Sequence[RawTransactionRow],
         now: datetime,
+        column_mapping: ColumnMapping | None = None,
         batch_id: UUID | None = None,
     ) -> Self:
         if not rows:
@@ -64,6 +67,7 @@ class Batch(BaseModel):
             created_by=created_by,
             created_at=now,
             rows=tuple(rows),
+            column_mapping=column_mapping,
         )
 
     @property
