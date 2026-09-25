@@ -1,6 +1,6 @@
 """Input commands and output DTOs of the use cases (Pydantic v2)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Self
 from uuid import UUID
 
@@ -26,6 +26,8 @@ class RegisterBatchCommand(BaseModel):
     ]
     submitted_by: ActorId
     content: bytes = Field(repr=False)
+    # Declared by the uploader: negative amounts are outflows, positive ones inflows.
+    signed_amounts: bool = False
 
 
 class ApproveBatchCommand(BaseModel):
@@ -84,3 +86,30 @@ class BatchDetailDTO(BatchDTO):
     @classmethod
     def from_entity(cls, batch: Batch) -> Self:
         return cls.model_validate({**BatchDTO.from_entity(batch).model_dump(), "rows": batch.rows})
+
+
+class TransactionQuery(BaseModel):
+    """Which movements an analysis looks at. By default, those of approved batches."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    date_from: date | None = None
+    date_to: date | None = None
+    currency: str | None = None
+    account: str | None = None
+    include_pending: bool = False  # also batches waiting for approval
+
+    @property
+    def statuses(self) -> tuple[BatchStatus, ...]:
+        if self.include_pending:
+            return (BatchStatus.APPROVED, BatchStatus.PENDING_APPROVAL)
+        return (BatchStatus.APPROVED,)
+
+
+class ReconcileCommand(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    content: bytes = Field(repr=False)
+    default_currency: Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")] = "EUR"
+    invert_debit_credit: bool = False
+    date_tolerance_days: int = Field(default=3, ge=0, le=31)

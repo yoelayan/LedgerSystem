@@ -8,12 +8,13 @@ from django.utils import timezone
 
 from ledger.domain.entities import Batch
 from ledger.domain.exceptions import BatchNotFoundError
-from ledger.infrastructure.models import BatchModel
+from ledger.infrastructure.models import BatchModel, TransactionModel
 
 
 class DjangoBatchRepository:
     def add(self, batch: Batch) -> None:
         BatchModel.objects.create(id=batch.id, **_to_fields(batch))
+        _store_transactions(batch)
 
     def get(self, batch_id: UUID) -> Batch:
         return _to_entity(self._fetch(BatchModel.objects.all(), batch_id))
@@ -30,6 +31,7 @@ class DjangoBatchRepository:
         )
         if updated != 1:
             raise BatchNotFoundError(batch.id)
+        _store_transactions(batch)
 
     def list_recent(self, limit: int) -> list[Batch]:
         return [_to_entity(m) for m in BatchModel.objects.order_by("-created_at")[:limit]]
@@ -40,6 +42,22 @@ class DjangoBatchRepository:
             return queryset.get(pk=batch_id)
         except BatchModel.DoesNotExist as exc:
             raise BatchNotFoundError(batch_id) from exc
+
+
+def _store_transactions(batch: Batch) -> None:
+    """Project the analysed rows into the analytics table, once per batch.
+
+    Runs inside the caller's transaction: the batch and its movements commit together.
+    """
+    if batch.analysis is None or TransactionModel.objects.filter(batch_id=batch.id).exists():
+        return
+    TransactionModel.objects.bulk_create(
+        [
+            TransactionModel(batch_id=batch.id, **t.model_dump(exclude={"batch_id"}))
+            for t in batch.valid_transactions()
+        ],
+        batch_size=1000,
+    )
 
 
 def _to_fields(batch: Batch) -> dict[str, Any]:

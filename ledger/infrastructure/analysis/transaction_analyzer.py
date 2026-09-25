@@ -24,6 +24,7 @@ from ledger.domain.value_objects import (
     SUPPORTED_CURRENCIES,
     AnalysisIssue,
     AnalysisReport,
+    Direction,
     IssueCode,
     RawTransactionRow,
     Severity,
@@ -57,7 +58,8 @@ class PandasTransactionAnalyzer:
 
     def analyze(self, rows: Sequence[RawTransactionRow]) -> AnalysisReport:
         frame = pd.DataFrame(
-            [row.model_dump() for row in rows], columns=["row_number", *REQUIRED_COLUMNS]
+            [row.model_dump() for row in rows],
+            columns=["row_number", *REQUIRED_COLUMNS, "direction"],
         )
         issues: list[AnalysisIssue] = []
 
@@ -143,8 +145,17 @@ class PandasTransactionAnalyzer:
             lambda row: f"external_id '{row['external_id']}' appears more than once.",
         )
 
+        invalid_direction = ~frame["direction"].isin([d.value for d in Direction])
+        flag(
+            invalid_direction,
+            IssueCode.INVALID_DIRECTION,
+            Severity.ERROR,
+            lambda row: f"'{row['direction']}' does not say whether it is an inflow or an outflow.",
+        )
+
         blocking = (
             missing.any(axis=1)
+            | invalid_direction
             | invalid_amount
             | non_positive
             | excessive_precision
@@ -155,7 +166,8 @@ class PandasTransactionAnalyzer:
         valid = ~blocking
 
         flag(
-            self._outliers(amounts.where(valid), currency, valid),
+            # Inflows and outflows are different populations: compare like with like.
+            self._outliers(amounts.where(valid), currency + "|" + frame["direction"], valid),
             IssueCode.AMOUNT_OUTLIER,
             Severity.WARNING,
             lambda row: (
@@ -164,22 +176,26 @@ class PandasTransactionAnalyzer:
             ),
         )
 
-        totals: dict[str, Decimal] = {}
-        for currency_code, group in decimals[valid].groupby(currency[valid]):
-            totals[str(currency_code)] = sum(group.tolist(), Decimal("0")).quantize(_CENT)
+        def totals(mask: pd.Series) -> dict[str, Decimal]:
+            return {
+                str(code): sum(group.tolist(), Decimal("0")).quantize(_CENT)
+                for code, group in decimals[mask].groupby(currency[mask])
+            }
 
         return AnalysisReport(
             total_rows=len(frame),
             valid_rows=int(valid.sum()),
-            totals_by_currency=totals,
+            totals_by_currency=totals(valid),
+            inflow_by_currency=totals(valid & frame["direction"].eq(Direction.INFLOW.value)),
+            outflow_by_currency=totals(valid & frame["direction"].eq(Direction.OUTFLOW.value)),
             issues=tuple(sorted(issues, key=lambda issue: (issue.row_number, issue.code))),
         )
 
-    def _outliers(self, values: pd.Series, currency: pd.Series, valid: pd.Series) -> pd.Series:
-        by_currency = values.groupby(currency)
-        median = by_currency.transform("median")
+    def _outliers(self, values: pd.Series, group: pd.Series, valid: pd.Series) -> pd.Series:
+        by_group = values.groupby(group)
+        median = by_group.transform("median")
         deviation = (values - median).abs()
-        mad = deviation.groupby(currency).transform("median")
-        sample_size = by_currency.transform("count")
+        mad = deviation.groupby(group).transform("median")
+        sample_size = by_group.transform("count")
         score = _MODIFIED_Z_FACTOR * deviation / mad.where(mad > 0)
         return valid & sample_size.ge(self._min_outlier_sample) & score.gt(self._outlier_threshold)

@@ -1,0 +1,6 @@
+<nav class="tabs" aria-label="Secciones de analítica">
+  <a href="{% url 'web:analytics' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}" class="{% if section == 'overview' %}active{% endif %}">Resumen y tendencias</a>
+  <a href="{% url 'web:analytics-timeline' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}" class="{% if section == 'timeline' %}active{% endif %}">Línea de tiempo</a>
+  <a href="{% url 'web:analytics-aml' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}" class="{% if section == 'aml' %}active{% endif %}">Patrones de blanqueo</a>
+  <a href="{% url 'web:analytics-reconciliation' %}" class="{% if section == 'reconciliation' %}active{% endif %}">Conciliación con el ERP</a>
+</nav>

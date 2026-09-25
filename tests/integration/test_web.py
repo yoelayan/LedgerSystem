@@ -1,5 +1,6 @@
 """The server-rendered UI: login, upload, review and decide, as real users."""
 
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -120,6 +121,30 @@ class TestUpload:
         response = _upload(alice, content)
 
         assert "se asumió día/mes" in response.content.decode()
+
+    def test_signed_amounts_checkbox(self, alice: Client) -> None:
+        content = (
+            b"external_id,account,amount,currency,value_date\n"
+            b"TX-1,ACC-1,-10.00,USD,2026-09-01\n"
+            b"TX-2,ACC-2,25.00,USD,2026-09-02\n"
+        )
+        response = alice.post(
+            "/batches/new/",
+            {
+                "reference": "extracto",
+                "signed_amounts": "on",
+                "file": SimpleUploadedFile("b.csv", content, "text/csv"),
+            },
+            follow=True,
+        )
+
+        batch = response.context["batch"]
+        assert batch.status == "PENDING_APPROVAL"
+        assert [r.direction for r in batch.rows] == ["OUTFLOW", "INFLOW"]
+        assert response.context["money"] == [
+            ("USD", Decimal("25.00"), Decimal("10.00"), Decimal("15.00"))
+        ]
+        assert "negativo = egreso" in response.content.decode()
 
     def test_blocking_errors_reject_automatically(self, alice: Client) -> None:
         response = _upload(alice, DIRTY_CSV)

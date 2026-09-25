@@ -1,13 +1,18 @@
 """Value objects and domain policies (immutable, validated by Pydantic)."""
 
+from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Final, Self
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 MAX_ROWS_PER_BATCH: Final = 10_000
 REQUIRED_COLUMNS: Final = ("external_id", "account", "amount", "currency", "value_date")
+# Recognised when present; without it, every movement of a batch is an outflow (a payment).
+OPTIONAL_COLUMNS: Final = ("direction",)
+DATASET_FIELDS: Final = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
 SUPPORTED_CURRENCIES: Final = frozenset({"USD", "EUR", "GBP", "MXN", "COP"})
 MAX_FRACTION_DIGITS: Final = 2
 SYSTEM_ACTOR: Final = "system"
@@ -21,6 +26,21 @@ class BatchStatus(StrEnum):
     PENDING_APPROVAL = "PENDING_APPROVAL"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+
+
+class Direction(StrEnum):
+    """Which way the money moves, from the point of view of the organisation."""
+
+    INFLOW = "INFLOW"  # ingreso: collections, refunds received, deposits
+    OUTFLOW = "OUTFLOW"  # egreso: payments, payroll, transfers out
+
+
+class DirectionSource(StrEnum):
+    """How the direction of a batch's movements was established."""
+
+    COLUMN = "COLUMN"  # a column says it ("Tipo: Ingreso/Egreso", "Cargo/Abono", "D/C"...)
+    SIGNED_AMOUNTS = "SIGNED_AMOUNTS"  # the uploader declared that negative means outflow
+    DEFAULT = "DEFAULT"  # neither: a batch of payments, all outflows
 
 
 class RawTransactionRow(BaseModel):
@@ -40,6 +60,9 @@ class RawTransactionRow(BaseModel):
     amount: str
     currency: str
     value_date: str
+    # Canonical INFLOW/OUTFLOW once ingested; anything else is reported by the analysis.
+    # Rows stored before directions existed were all payments, hence the default.
+    direction: str = Direction.OUTFLOW.value
     original_values: dict[str, str] = Field(default_factory=dict)
 
 
@@ -76,6 +99,7 @@ class ColumnMapping(BaseModel):
 
     matches: tuple[ColumnMatch, ...] = ()
     ignored_columns: tuple[str, ...] = ()
+    direction_source: DirectionSource | None = None
 
     def column_for(self, field: str) -> str | None:
         return next((m.source_column for m in self.matches if m.field == field), None)
@@ -93,6 +117,30 @@ class ParsedDataset(BaseModel):
     column_mapping: ColumnMapping
 
 
+class Transaction(BaseModel):
+    """A movement that passed the analysis, with real types instead of raw strings.
+
+    This is what the analytics work on: amounts are always positive and the direction
+    says which way the money moved.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    batch_id: UUID
+    row_number: int = Field(ge=1)
+    external_id: str
+    account: str
+    amount: Decimal = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    value_date: date
+    direction: Direction
+
+    @property
+    def signed_amount(self) -> Decimal:
+        """Positive for inflows, negative for outflows."""
+        return self.amount if self.direction is Direction.INFLOW else -self.amount
+
+
 class Severity(StrEnum):
     ERROR = "ERROR"  # blocks the batch: it is rejected automatically
     WARNING = "WARNING"  # informative: surfaced to the approver
@@ -106,6 +154,7 @@ class IssueCode(StrEnum):
     UNSUPPORTED_CURRENCY = "UNSUPPORTED_CURRENCY"
     INVALID_VALUE_DATE = "INVALID_VALUE_DATE"
     DUPLICATE_EXTERNAL_ID = "DUPLICATE_EXTERNAL_ID"
+    INVALID_DIRECTION = "INVALID_DIRECTION"
     AMOUNT_OUTLIER = "AMOUNT_OUTLIER"
 
 
@@ -125,7 +174,9 @@ class AnalysisReport(BaseModel):
 
     total_rows: int = Field(ge=0)
     valid_rows: int = Field(ge=0)
-    totals_by_currency: dict[str, Decimal]
+    totals_by_currency: dict[str, Decimal]  # volume: inflows + outflows
+    inflow_by_currency: dict[str, Decimal] = Field(default_factory=dict)
+    outflow_by_currency: dict[str, Decimal] = Field(default_factory=dict)
     issues: tuple[AnalysisIssue, ...] = ()
 
     @model_validator(mode="after")

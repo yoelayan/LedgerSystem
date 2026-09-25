@@ -75,7 +75,23 @@
     .meter { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; width: 80px; display: inline-block; vertical-align: middle; margin-right: 6px; }
     .meter span { display: block; height: 100%; background: var(--accent); }
     code { font-size: .9em; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+    .tabs a { padding: 8px 14px; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tabs a.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+    .filters-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+    .filters-form p { margin: 0; }
+    .filters-form input[type=date], .filters-form select, .filters-form input[type=text] {
+      padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+    .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 20px; }
+    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .tile .label { color: var(--muted); font-size: .85rem; }
+    .tile .value { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tile .hint { color: var(--muted); font-size: .8rem; }
+    .chart-box { position: relative; height: 280px; }
+    details > summary { cursor: pointer; color: var(--accent); margin-top: 8px; }
+    .pos { color: var(--ok); } .neg { color: var(--err); }
   </style>
+  {% block head %}{% endblock %}
 </head>
 <body>
   <header class="top">
@@ -83,6 +99,7 @@
       <a class="brand" href="{% url 'web:batch-list' %}">LedgerSystem</a>
       {% if user.is_authenticated %}
         <a href="{% url 'web:batch-list' %}">Lotes</a>
+        <a href="{% url 'web:analytics' %}">Analítica</a>
         <a class="btn primary" href="{% url 'web:batch-upload' %}">Subir CSV</a>
         <span class="muted">{{ user.get_username }}</span>
         <form method="post" action="{% url 'web:logout' %}">

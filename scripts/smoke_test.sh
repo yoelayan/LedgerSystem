@@ -45,6 +45,17 @@ dirty=$(curl -fsS -X POST "$BASE_URL/batches/$dirty_id/process/")
 expect "$(jq -r .status <<<"$dirty")" "REJECTED" "dirty batch"
 jq '.analysis.issues[] | "\(.row_number) \(.code)"' <<<"$dirty"
 
+echo "==> analytics: overview, timeline and AML over approved batches"
+overview=$(curl -fsS "$BASE_URL/analytics/overview/?granularity=DAY")
+[[ "$(jq -r .transaction_count <<<"$overview")" -ge 1 ]] || fail "overview has no transactions"
+curl -fsS "$BASE_URL/analytics/timeline/" | jq -e '.days | length >= 1' >/dev/null || fail "timeline"
+curl -fsS "$BASE_URL/analytics/aml/" | jq -e '.alerts' >/dev/null || fail "aml"
+
+echo "==> analytics: reconciliation with an ERP ledger"
+recon=$(curl -fsS -F file=@"$SAMPLES/analitica/erp_mayor_bancos_2026_09.csv" \
+  -F default_currency=EUR "$BASE_URL/analytics/reconciliation/")
+jq -r '"    \(.ledger_entries) entries, \(.result.matches | length) matched"' <<<"$recon"
+
 echo "==> unknown batch (404)"
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/batches/00000000-0000-0000-0000-000000000000/")
 expect "$code" "404" "not found"

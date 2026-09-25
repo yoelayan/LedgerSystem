@@ -1,6 +1,7 @@
 """State machine behaviour of the Batch aggregate: valid and invalid transitions."""
 
 from collections.abc import Callable
+from decimal import Decimal
 
 import pytest
 
@@ -173,3 +174,17 @@ class TestGuards:
 
         with pytest.raises(InvalidStateTransitionError):
             batch.approve(approver=SUBMITTER, now=NOW)
+
+
+class TestValidTransactions:
+    def test_empty_before_analysis(self) -> None:
+        assert make_batch().valid_transactions() == []
+
+    def test_rows_with_blocking_issues_are_left_out(self) -> None:
+        batch = make_batch(BatchStatus.PENDING_APPROVAL, analysis=blocking_report())
+
+        transactions = batch.valid_transactions()
+
+        assert [t.row_number for t in transactions] == [1, 3]
+        assert transactions[0].amount == Decimal("100.00")
+        assert transactions[0].signed_amount == Decimal("-100.00")

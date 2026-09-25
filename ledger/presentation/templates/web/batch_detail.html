@@ -13,9 +13,6 @@
       <dt>Filas</dt><dd>{{ batch.row_count }}</dd>
       {% if batch.analysis %}
         <dt>Filas válidas</dt><dd>{{ batch.analysis.valid_rows }} de {{ batch.analysis.total_rows }}</dd>
-        {% for currency, total in batch.analysis.totals_by_currency.items %}
-          <dt>Total {{ currency }}</dt><dd>{{ total }}</dd>
-        {% endfor %}
       {% endif %}
       {% if batch.decided_by %}
         <dt>Decidido por</dt><dd>{{ batch.decided_by }} · {{ batch.decided_at|date:"d/m/Y H:i" }}</dd>
@@ -24,6 +21,17 @@
         <dt>Motivo</dt><dd>{{ batch.rejection_reason }}</dd>
       {% endif %}
     </dl>
+    {% if money %}
+      <table style="margin-top: 12px;">
+        <thead><tr><th>Divisa</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Neto</th></tr></thead>
+        <tbody>
+          {% for currency, inflow, outflow, net in money %}
+            <tr><td>{{ currency }}</td><td class="num">{{ inflow }}</td><td class="num">{{ outflow }}</td><td class="num">{{ net }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted">Solo filas válidas.</p>
+    {% endif %}
   </section>
 
   <section class="card">
@@ -80,6 +88,9 @@
       {% endfor %}
     </tbody>
   </table>
+  {% if batch.column_mapping.direction_source %}
+    <p>Ingreso/egreso: <strong>{{ batch.column_mapping.direction_source|label:direction_source_labels }}</strong></p>
+  {% endif %}
   {% if batch.column_mapping.ignored_columns %}
     <p class="muted">Columnas ignoradas: {% for c in batch.column_mapping.ignored_columns %}<code>{{ c }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
   {% endif %}
@@ -106,11 +117,12 @@
 <section class="card table-scroll">
   <h2>Transacciones</h2>
   <table>
-    <thead><tr><th class="num">#</th><th>ID</th><th>Cuenta</th><th class="num">Importe</th><th>Divisa</th><th>Fecha valor</th></tr></thead>
+    <thead><tr><th class="num">#</th><th>ID</th><th>Cuenta</th><th>Tipo</th><th class="num">Importe</th><th>Divisa</th><th>Fecha valor</th></tr></thead>
     <tbody>
       {% for row, severity in rows %}
         <tr class="{{ severity }}">
           <td class="num">{{ row.row_number }}</td><td>{{ row.external_id }}</td><td>{{ row.account }}</td>
+          <td><span class="badge {% if row.direction == 'INFLOW' %}ok{% elif row.direction == 'OUTFLOW' %}{% else %}err{% endif %}">{{ row.direction|label:direction_labels }}</span>{% if row.original_values.direction %}<br><small class="muted" title="Valor en el archivo">{{ row.original_values.direction }}</small>{% endif %}</td>
           <td class="num">{{ row.amount }}{% if row.original_values.amount %}<br><small class="muted" title="Valor en el archivo">{{ row.original_values.amount }}</small>{% endif %}</td>
           <td>{{ row.currency }}</td>
           <td>{{ row.value_date }}{% if row.original_values.value_date %}<br><small class="muted" title="Valor en el archivo">{{ row.original_values.value_date }}</small>{% endif %}</td>

@@ -10,6 +10,7 @@ else still propagates and becomes a logged 500.
 
 from collections import Counter
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Final
 from uuid import UUID
 
@@ -30,7 +31,15 @@ from ledger.application.dtos import (
     RejectBatchCommand,
 )
 from ledger.domain.exceptions import DomainError
-from ledger.domain.value_objects import BatchStatus, IssueCode, MatchMethod, Severity
+from ledger.domain.value_objects import (
+    AnalysisReport,
+    BatchStatus,
+    Direction,
+    DirectionSource,
+    IssueCode,
+    MatchMethod,
+    Severity,
+)
 from ledger.presentation.composition import build_batch_service
 
 MAX_UPLOAD_BYTES: Final = 5 * 1024 * 1024
@@ -49,8 +58,15 @@ FIELD_LABELS: Final = {
     "amount": "Importe",
     "currency": "Divisa",
     "value_date": "Fecha valor",
+    "direction": "Tipo (ingreso/egreso)",
 }
-METHOD_LABELS: Final = {
+DIRECTION_LABELS: Final = {Direction.INFLOW: "Ingreso", Direction.OUTFLOW: "Egreso"}
+DIRECTION_SOURCE_LABELS: Final = {
+    DirectionSource.COLUMN: "Columna del archivo",
+    DirectionSource.SIGNED_AMOUNTS: "Signo del importe (declarado al subir: negativo = egreso)",
+    DirectionSource.DEFAULT: "Sin columna de tipo: todos son egresos (pagos)",
+}
+MATCH_METHOD_LABELS: Final = {
     MatchMethod.EXACT: "Nombre exacto",
     MatchMethod.VOCABULARY: "Nombre conocido",
     MatchMethod.SIMILARITY: "Nombre parecido (modelo)",
@@ -65,12 +81,17 @@ ISSUE_LABELS: Final = {
     IssueCode.INVALID_VALUE_DATE: "Fecha inválida",
     IssueCode.DUPLICATE_EXTERNAL_ID: "ID duplicado",
     IssueCode.AMOUNT_OUTLIER: "Importe atípico",
+    IssueCode.INVALID_DIRECTION: "Tipo no reconocido",
 }
 
 
 class UploadForm(forms.Form):
     reference = forms.CharField(label="Referencia", max_length=120)
     file = forms.FileField(label="Archivo CSV")
+    signed_amounts = forms.BooleanField(
+        label="Los importes llevan signo: negativo = egreso, positivo = ingreso",
+        required=False,
+    )
 
     def clean_file(self) -> UploadedFile:
         upload = self.cleaned_data["file"]
@@ -101,7 +122,7 @@ def batch_list(request: HttpRequest) -> HttpResponse:
             "selected": selected,
             "filters": [(s.value, STATUS_LABELS[s], counts.get(s, 0)) for s in BatchStatus],
             "total": sum(counts.values()),
-            "status_labels": _labels(STATUS_LABELS),
+            "status_labels": labels(STATUS_LABELS),
         },
     )
 
@@ -117,6 +138,7 @@ def batch_upload(request: HttpRequest) -> HttpResponse:
                 reference=form.cleaned_data["reference"],
                 submitted_by=request.user.get_username(),
                 content=form.cleaned_data["file"].read(),
+                signed_amounts=form.cleaned_data["signed_amounts"],
             )
         except ValidationError:
             # The form already checks the reference; this is e.g. a username the domain
@@ -126,7 +148,7 @@ def batch_upload(request: HttpRequest) -> HttpResponse:
             try:
                 batch = service.register_batch(command)
             except DomainError as exc:
-                form.add_error("file", _describe(exc))
+                form.add_error("file", describe_error(exc))
             else:
                 # Analyse straight away: uploading and then clicking "process" adds nothing.
                 return _run(request, batch.id, lambda: service.process_batch(batch.id))
@@ -139,7 +161,7 @@ def batch_detail(request: HttpRequest, batch_id: UUID) -> HttpResponse:
     try:
         batch = build_batch_service().get_batch_detail(batch_id)
     except DomainError as exc:
-        messages.error(request, _describe(exc))
+        messages.error(request, describe_error(exc))
         return redirect("web:batch-list")
 
     issues = batch.analysis.issues if batch.analysis else ()
@@ -160,10 +182,13 @@ def batch_detail(request: HttpRequest, batch_id: UUID) -> HttpResponse:
             "hidden_rows": max(0, len(batch.rows) - PREVIEW_ROWS),
             "errors": [i for i in issues if i.severity is Severity.ERROR],
             "warnings": [i for i in issues if i.severity is Severity.WARNING],
-            "status_labels": _labels(STATUS_LABELS),
+            "status_labels": labels(STATUS_LABELS),
             "field_labels": FIELD_LABELS,
-            "method_labels": _labels(METHOD_LABELS),
-            "issue_labels": _labels(ISSUE_LABELS),
+            "method_labels": labels(MATCH_METHOD_LABELS),
+            "direction_labels": labels(DIRECTION_LABELS),
+            "direction_source_labels": labels(DIRECTION_SOURCE_LABELS),
+            "money": _money_by_currency(batch.analysis),
+            "issue_labels": labels(ISSUE_LABELS),
             "is_owner": batch.created_by == request.user.get_username(),
             "can_decide": batch.status is BatchStatus.PENDING_APPROVAL,
             "reject_form": RejectForm(),
@@ -210,7 +235,7 @@ def _run(request: HttpRequest, batch_id: UUID, action: Callable[[], BatchDTO]) -
     try:
         batch = action()
     except DomainError as exc:
-        messages.error(request, _describe(exc))
+        messages.error(request, describe_error(exc))
     else:
         level, text = _OUTCOME_MESSAGES.get(batch.status, (messages.INFO, "Hecho."))
         messages.add_message(request, level, text)
@@ -226,7 +251,7 @@ _ERROR_MESSAGES: Final = {
 }
 
 
-def _describe(error: DomainError) -> str:
+def describe_error(error: DomainError) -> str:
     if error.code == "MALFORMED_DATASET" and "missing_columns" in error.context:
         missing = ", ".join(FIELD_LABELS.get(f, f) for f in error.context["missing_columns"])
         found = ", ".join(error.context.get("available_columns", [])) or "ninguna"
@@ -237,6 +262,24 @@ def _describe(error: DomainError) -> str:
     return _ERROR_MESSAGES.get(error.code, error.message)
 
 
-def _labels[K](labels: dict[K, str]) -> dict[str, str]:
+def _money_by_currency(
+    report: AnalysisReport | None,
+) -> list[tuple[str, Decimal, Decimal, Decimal]]:
+    """(currency, inflows, outflows, net) for the summary table."""
+    if report is None:
+        return []
+    zero = Decimal("0.00")
+    return [
+        (
+            code,
+            report.inflow_by_currency.get(code, zero),
+            report.outflow_by_currency.get(code, zero),
+            report.inflow_by_currency.get(code, zero) - report.outflow_by_currency.get(code, zero),
+        )
+        for code in sorted(report.totals_by_currency)
+    ]
+
+
+def labels[K](mapping: dict[K, str]) -> dict[str, str]:
     """Templates look labels up by the enum's string value."""
-    return {str(key): value for key, value in labels.items()}
+    return {str(key): value for key, value in mapping.items()}

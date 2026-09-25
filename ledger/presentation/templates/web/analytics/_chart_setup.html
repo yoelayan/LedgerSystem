@@ -1,0 +1,33 @@
+<script src="{% url 'web:chart-js' %}" defer></script>
+<style>
+  /* Chart roles (validated categorical palette, light and dark steps). */
+  .viz { --series-inflow: #2a78d6; --series-outflow: #eb6834; --series-net: #1baf7a; --grid: #e6e5e1; --axis: #52514e; }
+  @media (prefers-color-scheme: dark) {
+    .viz { --series-inflow: #3987e5; --series-outflow: #d95926; --series-net: #199e70; --grid: #2e2e2b; --axis: #c3c2b7; }
+  }
+</style>
+<script>
+  // Reads the colour roles from CSS so light/dark stay in one place.
+  function vizColors(el) {
+    const s = getComputedStyle(el);
+    const v = (name) => s.getPropertyValue(name).trim();
+    return { inflow: v('--series-inflow'), outflow: v('--series-outflow'), net: v('--series-net'), grid: v('--grid'), axis: v('--axis') };
+  }
+  function vizNumber(value, currency) {
+    return new Intl.NumberFormat('es-ES', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
+  }
+  function vizBaseOptions(c, currency) {
+    return {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', align: 'start', labels: { color: c.axis, usePointStyle: true, boxWidth: 8 } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${vizNumber(ctx.parsed.y, currency)}` } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: c.axis, maxRotation: 0, autoSkip: true } },
+        y: { grid: { color: c.grid }, border: { display: false }, ticks: { color: c.axis, callback: (v) => new Intl.NumberFormat('es-ES', { notation: 'compact' }).format(v) } },
+      },
+    };
+  }
+</script>

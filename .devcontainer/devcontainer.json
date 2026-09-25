@@ -10,7 +10,7 @@
     "DJANGO_CSRF_TRUSTED_ORIGINS": "https://*.app.github.dev"
   },
   "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends jq",
-  "postStartCommand": "docker compose up -d --build --wait --wait-timeout 180",
+  "postStartCommand": "docker compose up -d --build --wait --wait-timeout 180 && docker compose exec -T web python manage.py load_demo_analytics",
   "forwardPorts": [8000],
   "portsAttributes": {
     "8000": {

@@ -28,7 +28,7 @@ from ledger.presentation.composition import build_batch_service
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
-def _validate[T: BaseModel](schema: type[T], payload: dict[str, Any]) -> T:
+def validate[T: BaseModel](schema: type[T], payload: dict[str, Any]) -> T:
     try:
         return schema.model_validate(payload)
     except ValidationError as exc:
@@ -66,7 +66,7 @@ class BatchCollectionView(View):
             raise RequestValidationError(
                 "Uploaded file is too large.", max_bytes=MAX_UPLOAD_BYTES, size=upload.size
             )
-        command = _validate(RegisterBatchCommand, {**request.POST.dict(), "content": upload.read()})
+        command = validate(RegisterBatchCommand, {**request.POST.dict(), "content": upload.read()})
         return _batch_response(build_batch_service().register_batch(command), status=201)
 
 
@@ -90,7 +90,7 @@ class ApproveBatchView(View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, batch_id: UUID) -> JsonResponse:
-        command = _validate(ApproveBatchCommand, {**_json_body(request), "batch_id": batch_id})
+        command = validate(ApproveBatchCommand, {**_json_body(request), "batch_id": batch_id})
         return _batch_response(build_batch_service().approve_batch(command))
 
 
@@ -99,7 +99,7 @@ class RejectBatchView(View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, batch_id: UUID) -> JsonResponse:
-        command = _validate(RejectBatchCommand, {**_json_body(request), "batch_id": batch_id})
+        command = validate(RejectBatchCommand, {**_json_body(request), "batch_id": batch_id})
         return _batch_response(build_batch_service().reject_batch(command))
 
 

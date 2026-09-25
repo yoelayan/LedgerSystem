@@ -18,6 +18,12 @@
         <input type="file" name="file" id="{{ form.file.id_for_label }}" accept=".csv,text/csv" required>
         {{ form.file.errors }}
       </p>
+      <p>
+        <label style="font-weight: normal;"><input type="checkbox" name="signed_amounts" {% if form.signed_amounts.value %}checked{% endif %}>
+          Los importes llevan signo: negativo = egreso, positivo = ingreso</label>
+        <small class="muted">Márcalo solo si el archivo es así (p. ej. un extracto). Si hay una columna de tipo
+          (Ingreso/Egreso, Cargo/Abono, D/C), se usa esa. Sin ninguna de las dos, todo se trata como egreso (pagos).</small>
+      </p>
       <button class="btn primary" type="submit">Subir y analizar</button>
     </form>
   </div>

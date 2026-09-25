@@ -1,6 +1,6 @@
 from django.urls import path
 
-from ledger.presentation.api import views
+from ledger.presentation.api import analytics_views, views
 
 app_name = "ledger_api"
 
@@ -22,5 +22,13 @@ urlpatterns = [
         "batches/<uuid:batch_id>/reject/",
         views.RejectBatchView.as_view(),
         name="batch-reject",
+    ),
+    path("analytics/overview/", analytics_views.OverviewView.as_view(), name="analytics-overview"),
+    path("analytics/timeline/", analytics_views.TimelineView.as_view(), name="analytics-timeline"),
+    path("analytics/aml/", analytics_views.AmlView.as_view(), name="analytics-aml"),
+    path(
+        "analytics/reconciliation/",
+        analytics_views.ReconciliationView.as_view(),
+        name="analytics-reconciliation",
     ),
 ]

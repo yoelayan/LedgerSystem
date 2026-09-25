@@ -1,18 +1,20 @@
 """Test data builders."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from ledger.domain.entities import Batch
 from ledger.domain.value_objects import (
     AnalysisIssue,
     AnalysisReport,
     BatchStatus,
+    Direction,
     IssueCode,
     RawTransactionRow,
     Severity,
+    Transaction,
 )
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
@@ -89,3 +91,26 @@ DIRTY_CSV = csv_bytes(
     "TX-1,ACC-1,100.00,USD,2026-09-01",
     "TX-1,ACC-2,abc,USD,2026-09-02",
 )
+
+
+def make_tx(
+    amount: str = "100.00",
+    value_date: str = "2026-09-01",
+    *,
+    direction: str = "OUTFLOW",
+    account: str = "ACC-1",
+    currency: str = "EUR",
+    external_id: str | None = None,
+    batch_id: UUID | None = None,
+    row_number: int = 1,
+) -> Transaction:
+    return Transaction(
+        batch_id=batch_id or uuid4(),
+        row_number=row_number,
+        external_id=external_id or f"TX-{uuid4().hex[:8]}",
+        account=account,
+        amount=Decimal(amount),
+        currency=currency,
+        value_date=date.fromisoformat(value_date),
+        direction=Direction(direction),
+    )
