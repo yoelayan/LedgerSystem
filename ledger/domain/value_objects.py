@@ -1,8 +1,10 @@
 """Value objects and domain policies (immutable, validated by Pydantic)."""
 
+from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Final, Self
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -113,6 +115,30 @@ class ParsedDataset(BaseModel):
 
     rows: tuple[RawTransactionRow, ...]
     column_mapping: ColumnMapping
+
+
+class Transaction(BaseModel):
+    """A movement that passed the analysis, with real types instead of raw strings.
+
+    This is what the analytics work on: amounts are always positive and the direction
+    says which way the money moved.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    batch_id: UUID
+    row_number: int = Field(ge=1)
+    external_id: str
+    account: str
+    amount: Decimal = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    value_date: date
+    direction: Direction
+
+    @property
+    def signed_amount(self) -> Decimal:
+        """Positive for inflows, negative for outflows."""
+        return self.amount if self.direction is Direction.INFLOW else -self.amount
 
 
 class Severity(StrEnum):

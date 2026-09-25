@@ -1,7 +1,8 @@
 """The `Batch` aggregate root."""
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Self
 from uuid import UUID, uuid4
 
@@ -21,7 +22,10 @@ from ledger.domain.value_objects import (
     AnalysisReport,
     BatchStatus,
     ColumnMapping,
+    Direction,
     RawTransactionRow,
+    Severity,
+    Transaction,
 )
 
 
@@ -101,6 +105,26 @@ class Batch(BaseModel):
         self.decided_by = reviewer
         self.decided_at = now
         self.rejection_reason = reason.strip()
+
+    def valid_transactions(self) -> list[Transaction]:
+        """The rows the analysis accepted, typed. Empty until the batch is analysed."""
+        if self.analysis is None:
+            return []
+        blocked = {i.row_number for i in self.analysis.issues if i.severity is Severity.ERROR}
+        return [
+            Transaction(
+                batch_id=self.id,
+                row_number=row.row_number,
+                external_id=row.external_id,
+                account=row.account,
+                amount=Decimal(row.amount),
+                currency=row.currency.upper(),
+                value_date=date.fromisoformat(row.value_date),
+                direction=Direction(row.direction),
+            )
+            for row in self.rows
+            if row.row_number not in blocked
+        ]
 
     def _fire(self, event: str, **kwargs: Any) -> None:
         machine = BatchLifecycle(self)
