@@ -66,7 +66,7 @@ DIRECTION_SOURCE_LABELS: Final = {
     DirectionSource.SIGNED_AMOUNTS: "Signo del importe (declarado al subir: negativo = egreso)",
     DirectionSource.DEFAULT: "Sin columna de tipo: todos son egresos (pagos)",
 }
-METHOD_LABELS: Final = {
+MATCH_METHOD_LABELS: Final = {
     MatchMethod.EXACT: "Nombre exacto",
     MatchMethod.VOCABULARY: "Nombre conocido",
     MatchMethod.SIMILARITY: "Nombre parecido (modelo)",
@@ -122,7 +122,7 @@ def batch_list(request: HttpRequest) -> HttpResponse:
             "selected": selected,
             "filters": [(s.value, STATUS_LABELS[s], counts.get(s, 0)) for s in BatchStatus],
             "total": sum(counts.values()),
-            "status_labels": _labels(STATUS_LABELS),
+            "status_labels": labels(STATUS_LABELS),
         },
     )
 
@@ -148,7 +148,7 @@ def batch_upload(request: HttpRequest) -> HttpResponse:
             try:
                 batch = service.register_batch(command)
             except DomainError as exc:
-                form.add_error("file", _describe(exc))
+                form.add_error("file", describe_error(exc))
             else:
                 # Analyse straight away: uploading and then clicking "process" adds nothing.
                 return _run(request, batch.id, lambda: service.process_batch(batch.id))
@@ -161,7 +161,7 @@ def batch_detail(request: HttpRequest, batch_id: UUID) -> HttpResponse:
     try:
         batch = build_batch_service().get_batch_detail(batch_id)
     except DomainError as exc:
-        messages.error(request, _describe(exc))
+        messages.error(request, describe_error(exc))
         return redirect("web:batch-list")
 
     issues = batch.analysis.issues if batch.analysis else ()
@@ -182,13 +182,13 @@ def batch_detail(request: HttpRequest, batch_id: UUID) -> HttpResponse:
             "hidden_rows": max(0, len(batch.rows) - PREVIEW_ROWS),
             "errors": [i for i in issues if i.severity is Severity.ERROR],
             "warnings": [i for i in issues if i.severity is Severity.WARNING],
-            "status_labels": _labels(STATUS_LABELS),
+            "status_labels": labels(STATUS_LABELS),
             "field_labels": FIELD_LABELS,
-            "method_labels": _labels(METHOD_LABELS),
-            "direction_labels": _labels(DIRECTION_LABELS),
-            "direction_source_labels": _labels(DIRECTION_SOURCE_LABELS),
+            "method_labels": labels(MATCH_METHOD_LABELS),
+            "direction_labels": labels(DIRECTION_LABELS),
+            "direction_source_labels": labels(DIRECTION_SOURCE_LABELS),
             "money": _money_by_currency(batch.analysis),
-            "issue_labels": _labels(ISSUE_LABELS),
+            "issue_labels": labels(ISSUE_LABELS),
             "is_owner": batch.created_by == request.user.get_username(),
             "can_decide": batch.status is BatchStatus.PENDING_APPROVAL,
             "reject_form": RejectForm(),
@@ -235,7 +235,7 @@ def _run(request: HttpRequest, batch_id: UUID, action: Callable[[], BatchDTO]) -
     try:
         batch = action()
     except DomainError as exc:
-        messages.error(request, _describe(exc))
+        messages.error(request, describe_error(exc))
     else:
         level, text = _OUTCOME_MESSAGES.get(batch.status, (messages.INFO, "Hecho."))
         messages.add_message(request, level, text)
@@ -251,7 +251,7 @@ _ERROR_MESSAGES: Final = {
 }
 
 
-def _describe(error: DomainError) -> str:
+def describe_error(error: DomainError) -> str:
     if error.code == "MALFORMED_DATASET" and "missing_columns" in error.context:
         missing = ", ".join(FIELD_LABELS.get(f, f) for f in error.context["missing_columns"])
         found = ", ".join(error.context.get("available_columns", [])) or "ninguna"
@@ -280,6 +280,6 @@ def _money_by_currency(
     ]
 
 
-def _labels[K](labels: dict[K, str]) -> dict[str, str]:
+def labels[K](mapping: dict[K, str]) -> dict[str, str]:
     """Templates look labels up by the enum's string value."""
-    return {str(key): value for key, value in labels.items()}
+    return {str(key): value for key, value in mapping.items()}

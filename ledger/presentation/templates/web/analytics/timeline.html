@@ -1,0 +1,67 @@
+{% extends "web/base.html" %}
+{% load ledger_ui %}
+{% block title %}Línea de tiempo{% endblock %}
+{% block head %}{% include "web/analytics/_chart_setup.html" %}{% endblock %}
+{% block content %}
+<h1>Analítica</h1>
+{% include "web/analytics/_tabs.html" %}
+{% include "web/analytics/_filters.html" %}
+
+{% if not result.entries %}
+  <div class="card"><p class="muted">No hay movimientos ni eventos con estos filtros.</p></div>
+{% else %}
+  {% for chart in charts %}
+    <section class="card viz">
+      <h2>Flujo neto acumulado · {{ chart.currency }}{% if form.data.account %} · {{ form.data.account }}{% endif %}</h2>
+      <p class="muted">Suma de ingresos menos egresos día a día (por fecha valor) desde el primer día mostrado. No es el saldo bancario: el sistema no conoce el saldo inicial.</p>
+      <div class="chart-box"><canvas id="balance-{{ chart.currency }}" role="img" aria-label="Flujo neto acumulado en {{ chart.currency }}"></canvas></div>
+      {{ chart|json_script:chart.element_id }}
+    </section>
+  {% endfor %}
+
+  <section class="card table-scroll">
+    <h2>Cronología</h2>
+    <table>
+      <thead><tr><th>Fecha</th><th>Movimientos (fecha valor)</th><th>Lotes</th></tr></thead>
+      <tbody>
+        {% for entry in entries %}
+          <tr>
+            <td style="white-space: nowrap;">{{ entry.day|date:"d/m/Y" }}</td>
+            <td>
+              {% for m in entry.movements %}
+                <div>{{ m.currency }}: <span class="pos">+{{ m.totals.inflow|money }}</span> / <span class="neg">−{{ m.totals.outflow|money }}</span>
+                  <span class="muted">({{ m.totals.count }} mov., acumulado {{ m.balance|money }})</span></div>
+              {% empty %}<span class="muted">—</span>{% endfor %}
+            </td>
+            <td>
+              {% for e in entry.events %}
+                <div>{{ e.at|date:"H:i" }} · <strong>{{ e.actor }}</strong> {{ e.kind|label:event_labels }}
+                  <a href="{% url 'web:batch-detail' e.batch_id %}">{{ e.reference }}</a>{% if e.detail %} <span class="muted">— {{ e.detail }}</span>{% endif %}</div>
+              {% empty %}<span class="muted">—</span>{% endfor %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if hidden_entries %}<p class="muted">Se muestran las {{ entries|length }} fechas más recientes; hay {{ hidden_entries }} más (descárgalas en CSV o acota las fechas).</p>{% endif %}
+  </section>
+{% endif %}
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (!window.Chart) return;
+    document.querySelectorAll('canvas[id^="balance-"]').forEach((canvas) => {
+      const currency = canvas.id.slice(8);
+      const data = JSON.parse(document.getElementById(`${currency}-balance-data`).textContent);
+      const c = vizColors(canvas.closest('.viz'));
+      const options = vizBaseOptions(c, currency);
+      options.plugins.legend.display = false;  // one series: the title names it
+      new Chart(canvas, {
+        type: 'line',
+        data: { labels: data.labels, datasets: [{ label: 'Acumulado', data: data.balance.map(Number), borderColor: c.inflow, backgroundColor: c.inflow, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, stepped: true }] },
+        options,
+      });
+    });
+  });
+</script>
+{% endblock %}

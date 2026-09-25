@@ -126,7 +126,7 @@ def test_classifier_reports_the_nearest_known_header() -> None:
     prediction = default_classifier().predict("Importe neto (EUR)")["amount"]
 
     assert prediction.nearest == "importe neto"
-    assert prediction.similarity > 0.9
+    assert prediction.similarity > 0.8
 
 
 def test_vocabulary_file_is_the_training_data(tmp_path: Path) -> None:

@@ -1,0 +1,58 @@
+{% extends "web/base.html" %}
+{% load ledger_ui %}
+{% block title %}Patrones de blanqueo{% endblock %}
+{% block content %}
+<h1>Analítica</h1>
+{% include "web/analytics/_tabs.html" %}
+{% include "web/analytics/_filters.html" %}
+
+<div class="card">
+  <p><strong>Son indicios para revisar, no conclusiones.</strong> Cada alerta dice qué regla saltó, con qué movimientos y por qué.
+    Un negocio legítimo puede activar cualquiera; la decisión de reportar es siempre de una persona.</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Regla</th><th>Qué busca</th><th class="num">Alertas</th></tr></thead>
+    <tbody>
+      {% for rule, name, description, count in rules %}
+        <tr><td style="white-space: nowrap;"><strong>{{ name }}</strong></td><td class="muted">{{ description }}</td><td class="num">{{ count }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted">Umbrales de declaración usados:
+    {% for currency, amount in thresholds %}<code>{{ amount|money }} {{ currency }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+    Se analizaron {{ result.transaction_count }} movimientos.</p>
+</div>
+
+<section class="card table-scroll">
+  <h2>Alertas ({{ alerts|length }})</h2>
+  {% if alerts %}
+    <table>
+      <thead><tr><th>Severidad</th><th>Regla y motivo</th><th>Cuenta</th><th class="num">Total</th><th>Fechas</th></tr></thead>
+      <tbody>
+        {% for alert, explanation in alerts %}
+          <tr>
+            <td><span class="badge {% if alert.severity == 'HIGH' %}err{% elif alert.severity == 'MEDIUM' %}warn{% endif %}">{% if alert.severity == 'HIGH' %}▲ {% endif %}{{ alert.severity|label:severity_labels }}</span></td>
+            <td style="min-width: 320px;"><strong>{{ alert.rule|label:rule_labels }}</strong><br>{{ explanation }}
+              <details><summary>{{ alert.transactions|length }} movimientos</summary>
+                <table>
+                  <thead><tr><th>Fecha</th><th>Tipo</th><th class="num">Importe</th><th>Referencia</th><th>Lote</th></tr></thead>
+                  <tbody>
+                    {% for t in alert.transactions %}
+                      <tr><td>{{ t.value_date|date:"d/m/Y" }}</td><td>{{ t.direction|label:direction_labels }}</td><td class="num">{{ t.amount|money }}</td><td>{{ t.external_id }}</td>
+                        <td><a href="{% url 'web:batch-detail' t.batch_id %}">ver lote</a></td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </details>
+            </td>
+            <td><a href="{% url 'web:analytics-timeline' %}?account={{ alert.account|urlencode }}&amp;currency={{ alert.currency }}">{{ alert.account }}</a></td>
+            <td class="num" style="white-space: nowrap;">{{ alert.total|money }} {{ alert.currency }}</td>
+            <td style="white-space: nowrap;">{{ alert.first_date|date:"d/m/Y" }}{% if alert.last_date != alert.first_date %}<br>{{ alert.last_date|date:"d/m/Y" }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">Ninguna regla se activó con estos filtros.</p>
+  {% endif %}
+</section>
+{% endblock %}

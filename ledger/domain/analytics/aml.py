@@ -247,7 +247,7 @@ def _round_amounts(
             account,
             currency,
             rounded,
-            unit=unit.normalize(),
+            unit=unit.quantize(Decimal("1")),
             share_pct=(share * 100).quantize(Decimal("1")),
             count=len(rounded),
             of=len(movements),

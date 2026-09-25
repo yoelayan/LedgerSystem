@@ -81,7 +81,7 @@ def test_round_amounts() -> None:
     [alert] = scan(movements)
 
     assert alert.rule is AmlRule.ROUND_AMOUNTS
-    assert alert.facts == {"unit": "1E+3", "share_pct": "75", "count": "3", "of": "4"}
+    assert alert.facts == {"unit": "1000", "share_pct": "75", "count": "3", "of": "4"}
 
 
 def test_high_velocity() -> None:

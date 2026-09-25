@@ -30,7 +30,18 @@
     "id transferencia",
     "numero documento",
     "comprobante",
-    "voucher"
+    "voucher",
+    "documento",
+    "numero documento",
+    "numero de documento",
+    "doc",
+    "n documento",
+    "referencia pago",
+    "referencia de pago",
+    "justificante",
+    "numero justificante",
+    "factura",
+    "numero factura"
   ],
   "account": [
     "account",
@@ -116,7 +127,14 @@
     "settlement date",
     "fecha liquidacion",
     "dia",
-    "day"
+    "day",
+    "fecha asiento",
+    "fecha de asiento",
+    "fecha apunte",
+    "fecha documento",
+    "fecha registro",
+    "entry date",
+    "posting"
   ],
   "direction": [
     "direction",
@@ -138,6 +156,47 @@
     "debit credit",
     "dc",
     "signo",
-    "in out"
+    "in out",
+    "d h",
+    "dh",
+    "debe haber",
+    "debe o haber",
+    "signo dh",
+    "naturaleza apunte",
+    "tipo apunte"
+  ],
+  "debit": [
+    "debit",
+    "debe",
+    "importe debe",
+    "saldo deudor",
+    "debitos",
+    "cargos contables",
+    "debe eur",
+    "debe moneda"
+  ],
+  "credit": [
+    "credit",
+    "haber",
+    "importe haber",
+    "saldo acreedor",
+    "creditos",
+    "abonos contables",
+    "haber eur",
+    "haber moneda"
+  ],
+  "description": [
+    "description",
+    "descripcion",
+    "concepto",
+    "detalle",
+    "glosa",
+    "memo",
+    "texto",
+    "observaciones",
+    "comentario",
+    "narrativa",
+    "descripcion asiento",
+    "concepto asiento"
   ]
 }

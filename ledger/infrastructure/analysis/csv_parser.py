@@ -46,31 +46,9 @@ class PandasCsvParser:
         self._mapper = mapper or VectorColumnMapper()
 
     def parse(self, content: bytes, *, signed_amounts: bool = False) -> ParsedDataset:
-        if not content.strip():
-            raise EmptyBatchError()
-        try:
-            text = content.decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise MalformedDatasetError("file is not valid UTF-8 text.") from exc
-        try:
-            frame = pd.read_csv(
-                io.StringIO(text),
-                sep=_sniff_delimiter(text),
-                dtype=str,
-                keep_default_na=False,
-            )
-        except pd.errors.EmptyDataError as exc:
-            raise EmptyBatchError() from exc
-        except pd.errors.ParserError as exc:
-            raise MalformedDatasetError(f"CSV could not be parsed ({exc}).") from exc
-
-        frame.columns = [str(column).strip() for column in frame.columns]
+        frame = read_frame(content)
         columns = list(frame.columns)
-        # Short rows yield NaN for the absent trailing fields: normalise them to "" so the
-        # analyzer reports them as MISSING_VALUE instead of crashing on a non-string.
-        frame = frame.fillna("").apply(lambda column: column.str.strip())
-        samples = {column: frame[column].head(SAMPLE_SIZE).tolist() for column in columns}
-        mapping = self._mapper.map(columns, samples)
+        mapping = self._mapper.map(columns, samples_of(frame))
         if mapping.missing_fields:
             missing = list(mapping.missing_fields)
             raise MalformedDatasetError(
@@ -139,6 +117,32 @@ def _with_formats(
         for match in mapping.matches
     )
     return mapping.model_copy(update={"matches": matches})
+
+
+def read_frame(content: bytes) -> pd.DataFrame:
+    """Decode, sniff the delimiter and read every value as a stripped string."""
+    if not content.strip():
+        raise EmptyBatchError()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise MalformedDatasetError("file is not valid UTF-8 text.") from exc
+    try:
+        frame = pd.read_csv(
+            io.StringIO(text), sep=_sniff_delimiter(text), dtype=str, keep_default_na=False
+        )
+    except pd.errors.EmptyDataError as exc:
+        raise EmptyBatchError() from exc
+    except pd.errors.ParserError as exc:
+        raise MalformedDatasetError(f"CSV could not be parsed ({exc}).") from exc
+    frame.columns = [str(column).strip() for column in frame.columns]
+    # Short rows yield NaN for the absent trailing fields: normalise them to "" so the
+    # analysis reports them as missing values instead of crashing on a non-string.
+    return frame.fillna("").apply(lambda column: column.str.strip())
+
+
+def samples_of(frame: pd.DataFrame) -> dict[str, list[str]]:
+    return {column: frame[column].head(SAMPLE_SIZE).tolist() for column in frame.columns}
 
 
 def _sniff_delimiter(text: str) -> str:

@@ -100,7 +100,7 @@ def test_reports_how_each_column_was_identified() -> None:
 
 def test_semicolon_separated_file_with_bom_and_other_headers() -> None:
     content = (
-        "﻿Referencia;Nº de cuenta;Importe;Moneda;Fecha valor;Concepto\n"
+        "\ufeffReferencia;Nº de cuenta;Importe;Moneda;Fecha valor;Concepto\n"
         "OP-1;ES9121000418450200051332;12.50;EUR;2026-09-01;Nómina, septiembre\n"
     ).encode()
 

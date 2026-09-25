@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from ledger.presentation.web import views
+from ledger.presentation.web import analytics_views, assets, views
 
 app_name = "web"
 
@@ -21,4 +21,13 @@ urlpatterns = [
     path("batches/<uuid:batch_id>/process/", views.batch_process, name="batch-process"),
     path("batches/<uuid:batch_id>/approve/", views.batch_approve, name="batch-approve"),
     path("batches/<uuid:batch_id>/reject/", views.batch_reject, name="batch-reject"),
+    path(f"assets/{assets.CHART_JS}", assets.chart_js, name="chart-js"),
+    path("analytics/", analytics_views.overview, name="analytics"),
+    path("analytics/timeline/", analytics_views.timeline, name="analytics-timeline"),
+    path("analytics/aml/", analytics_views.aml, name="analytics-aml"),
+    path(
+        "analytics/reconciliation/",
+        analytics_views.reconciliation,
+        name="analytics-reconciliation",
+    ),
 ]

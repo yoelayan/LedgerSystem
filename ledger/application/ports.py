@@ -5,8 +5,16 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
+from ledger.application.dtos import TransactionQuery
+from ledger.domain.analytics.reconciliation import ParsedLedger
+from ledger.domain.analytics.timeline import BatchEvent
 from ledger.domain.entities import Batch
-from ledger.domain.value_objects import AnalysisReport, ParsedDataset, RawTransactionRow
+from ledger.domain.value_objects import (
+    AnalysisReport,
+    ParsedDataset,
+    RawTransactionRow,
+    Transaction,
+)
 
 Clock = Callable[[], datetime]
 
@@ -43,3 +51,21 @@ class DatasetParser(Protocol):
 
 class TransactionAnalyzer(Protocol):
     def analyze(self, rows: Sequence[RawTransactionRow]) -> AnalysisReport: ...
+
+
+class TransactionReadModel(Protocol):
+    """Queries over the movements of analysed batches (the analytics read model)."""
+
+    def transactions(self, query: TransactionQuery) -> list[Transaction]: ...
+
+    def batch_events(self, query: TransactionQuery) -> list[BatchEvent]:
+        """Uploads and decisions of the batches involved, within the query's dates."""
+        ...
+
+    def currencies(self) -> list[str]: ...
+
+
+class LedgerParser(Protocol):
+    def parse(self, content: bytes, *, default_currency: str, invert: bool = False) -> ParsedLedger:
+        """Raises MalformedDatasetError / EmptyBatchError when the file is unusable."""
+        ...

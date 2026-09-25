@@ -11,6 +11,8 @@ Proyecto de referencia que muestra cómo construir un servicio financiero **corr
 
 Un usuario sube un CSV de transacciones desde la **web** (o la API). Un pequeño **modelo de vectores entrenado localmente** identifica qué columna es cada campo, aunque se llamen distinto ("Importe", "Nº de cuenta", "Fecha valor"…). El sistema lo analiza con pandas (importes, duplicados, divisas, fechas y anomalías estadísticas) y lo lleva por un ciclo de vida controlado por una máquina de estados hasta que un **segundo** usuario lo aprueba o lo rechaza.
 
+Sobre los movimientos aprobados, el módulo de **analítica** muestra tendencias de ingresos y egresos, una línea de tiempo, alertas de posibles patrones de blanqueo y la **conciliación con el libro contable del ERP**.
+
 ---
 
 ## Índice
@@ -24,11 +26,13 @@ Un usuario sube un CSV de transacciones desde la **web** (o la API). Un pequeño
 5. [Análisis de datos con pandas](#5-análisis-de-datos-con-pandas)
    - [Identificación de columnas](#identificación-de-columnas-modelo-de-vectores)
    - [Formatos locales de importes y fechas](#formatos-locales-de-importes-y-fechas)
-6. [Ejecución con Docker](#6-ejecución-con-docker)
+   - [Ingresos y egresos](#ingresos-y-egresos)
+6. [Analítica](#6-analítica)
+7. [Ejecución con Docker](#7-ejecución-con-docker)
    - [Frontend web](#frontend-web)
-7. [API](#7-api)
-8. [Tests y CI](#8-tests-y-ci)
-9. [Decisiones y trade-offs](#9-decisiones-y-trade-offs)
+8. [API](#8-api)
+9. [Tests y CI](#9-tests-y-ci)
+10. [Decisiones y trade-offs](#10-decisiones-y-trade-offs)
 
 ---
 
@@ -46,7 +50,7 @@ Leyenda: ✅ funciona hoy · 🔧 encaja con el diseño, pero necesita una ampli
 | 2 | **Revisión de remesas de pagos a proveedores** con el principio de los cuatro ojos | ✅ | Quien sube no aprueba: lo exige el dominio y también la base de datos (`CHECK`). Rechazar exige motivo. |
 | 3 | **Revisión de nóminas** antes de mandarlas al banco | ✅ | Detecta cuentas vacías, transacciones duplicadas (misma referencia) e importes fuera de lo normal, como un cero de más. |
 | 4 | **Pagos masivos multidivisa** | ✅ | Totales por divisa con `Decimal` (sin errores de redondeo) y lista de divisas admitidas. Los atípicos se calculan por divisa: 3.500.000 COP no es raro, 3.500.000 EUR sí. |
-| 5 | **Detección de pagos duplicados** | ✅ dentro del lote · 🔧 entre lotes | Un `external_id` repetido bloquea el lote. Detectar que un pago ya se aprobó en un lote anterior requiere guardar las transacciones en una tabla consultable (hoy van en JSONB por lote). |
+| 5 | **Detección de pagos duplicados** | ✅ | Dentro de un lote, un `external_id` repetido lo bloquea. Entre lotes, la regla *pago repetido* de la analítica avisa cuando el mismo pago (cuenta e importe) aparece en lotes distintos con pocos días de diferencia. |
 | 6 | **Detección de errores de tecleo e importes sospechosos** | ✅ | Puntuación z robusta (mediana/MAD) por divisa: un importe desproporcionado se marca como aviso para el aprobador, sin bloquear. |
 | 7 | **Revisión de devoluciones o reembolsos masivos** (e-commerce, seguros) | ✅ | Mismo flujo que un pago: el lote se valida y lo aprueba alguien distinto de quien lo preparó. |
 
@@ -54,7 +58,7 @@ Leyenda: ✅ funciona hoy · 🔧 encaja con el diseño, pero necesita una ampli
 
 | # | Caso de uso | Estado | Qué lo hace posible |
 |---|---|---|---|
-| 8 | **Revisión de lotes grandes de movimientos** | ✅ hasta 10.000 filas · 🔧 análisis entre lotes | Un lote de 5.000 filas se sube y analiza en 1–2 s (ver `samples/lote_5000.csv`). Es una **revisión de validez de cada lote, no un estudio analítico**: no hay tendencias, comparativas entre periodos ni consultas sobre el histórico. Eso pediría una tabla de transacciones y un módulo de análisis. Para más de 10.000 filas, el análisis debería pasar a una tarea asíncrona (Celery/RQ). |
+| 8 | **Estudio de grandes volúmenes de movimientos** | ✅ | Cada lote (hasta 10.000 filas; 5.000 se analizan en 1–2 s) se valida al subirlo. Los movimientos válidos pasan a una tabla consultable, sobre la que la [analítica](#6-analítica) calcula tendencias por día, semana o mes, compara periodos y muestra las cuentas con más movimiento. Para más de 10.000 filas por lote, el análisis debería pasar a una tarea asíncrona (Celery/RQ). |
 | 9 | **Unificar exportaciones de distintos bancos o ERPs** | ✅ | Cada exportación trae sus propias cabeceras, separadores y formatos (`Importe`/`Amount`, `;`/`,`, `1.250,50`/`1,250.50`, `DD/MM/AAAA`). El modelo de columnas y la normalización los llevan a un formato común, y se ve qué se interpretó. |
 | 10 | **Validación de datos en una migración entre sistemas** | ✅ | Antes de cargar movimientos de un sistema antiguo en uno nuevo: el lote se rechaza con **todos** los errores listados, no solo el primero, para corregirlos de una vez. |
 | 11 | **Pre-validación de archivos que suben clientes** (fintech, pasarela de pagos masivos) | ✅ validación · 🔧 multi-cliente | El cliente recibe al momento los errores de cada fila (en el informe del lote, también por la API en JSON) en lugar de un rechazo del banco días después. Para varios clientes faltan autenticación y separación de datos por cliente. |
@@ -66,20 +70,22 @@ Leyenda: ✅ funciona hoy · 🔧 encaja con el diseño, pero necesita una ampli
 | 12 | **Segregación de funciones para control interno** (p. ej. controles tipo SOX) | ✅ | La regla de que quien prepara no aprueba no depende de la interfaz: la aplica el dominio y la repite la base de datos. |
 | 13 | **Trazabilidad para auditoría** | ✅ por lote · 🔧 bitácora completa | Cada lote guarda quién lo subió, quién decidió, cuándo y el motivo del rechazo, cómo se interpretaron las columnas y los valores originales antes de normalizarlos. Una bitácora de *todos* los eventos (quién vio o procesó qué) sería una tabla de eventos adicional. |
 | 14 | **Varios aprobadores trabajando a la vez** (equipos de tesorería) | ✅ | Si dos personas aprueban o rechazan el mismo lote simultáneamente, solo una gana y la otra recibe un aviso claro (bloqueo `SELECT ... FOR UPDATE`, probado con tests de concurrencia). |
-| 15 | **Informes** | ✅ informe por lote · 🔧 exportación y reportes agregados | Hoy cada lote tiene su **informe de validación**: filas válidas, totales por divisa, errores y avisos por fila, en la web y en JSON por la API. **No hay** exportación a PDF/Excel ni reportes que agreguen varios lotes (por ejemplo, lo aprobado por mes y divisa). Añadirlos es directo a partir de los datos guardados. |
+| 15 | **Informes** | ✅ · 🔧 PDF | Cada lote tiene su **informe de validación**. La analítica exporta a **CSV** (compatible con Excel): totales por periodo y divisa, línea de tiempo, alertas y el informe de conciliación. Todo está también en JSON por la API. No hay exportación a PDF. |
+| 16 | **Conciliación contable con el ERP** | ✅ | Se sube la exportación del mayor de bancos y se cruza con lo aprobado: conciliados, discrepancias, aprobados sin contabilizar y contabilizados sin lote. |
+| 17 | **Detección de patrones de blanqueo (AML)** | ✅ indicios · 🔧 sistema de riesgo completo | Seis reglas explicables (fraccionamiento, cuenta de paso, importes redondos, velocidad, picos, pagos repetidos) con umbrales ajustables. Son indicios para revisión humana, no un sistema de cumplimiento: no hay listas de sanciones, perfiles de cliente ni reporte a la autoridad. |
 
 ### Aprendizaje
 
 | # | Caso de uso | Estado | Qué lo hace posible |
 |---|---|---|---|
-| 16 | **Proyecto de referencia para equipos de desarrollo** | ✅ | Muestra con código y tests cómo se resuelven problemas reales: DDD con capas verificadas por tests, máquina de estados, errores con código estable, concurrencia con bloqueo pesimista y análisis de datos sin `float` para el dinero. |
+| 18 | **Proyecto de referencia para equipos de desarrollo** | ✅ | Muestra con código y tests cómo se resuelven problemas reales: DDD con capas verificadas por tests, máquina de estados, errores con código estable, concurrencia con bloqueo pesimista y análisis de datos sin `float` para el dinero. |
 
 ### Lo que el sistema **no** hace (y no debería prometerse)
 
 - **Ejecutar pagos** o conectarse a bancos: aprueba lotes que otro sistema ejecutará.
-- **Conciliación bancaria**: no cruza los movimientos con un extracto.
-- **Prevención de fraude o blanqueo (AML)**: la detección de atípicos avisa de importes raros dentro de un lote; no es un sistema de riesgo.
-- **Contabilidad**: no genera asientos ni lleva saldos.
+- **Conciliación con el extracto bancario**: concilia con el libro contable del ERP, no con el extracto del banco.
+- **Cumplimiento AML completo**: las alertas son indicios para revisar. No hay listas de sanciones, conocimiento del cliente ni reporte a la autoridad.
+- **Contabilidad**: no genera asientos ni lleva saldos (el "flujo acumulado" de la línea de tiempo no es un saldo bancario).
 
 ---
 
@@ -154,25 +160,30 @@ ledger/
 ├── domain/                 # Python puro + Pydantic. Sin Django ni pandas.
 │   ├── entities.py         # Aggregate root Batch
 │   ├── state_machine.py    # BatchLifecycle (python-statemachine) + guards
-│   ├── value_objects.py    # BatchStatus, AnalysisReport, políticas (límites, divisas)
-│   └── exceptions.py       # Jerarquía de errores de dominio
+│   ├── value_objects.py    # BatchStatus, AnalysisReport, Transaction, políticas
+│   ├── exceptions.py       # Jerarquía de errores de dominio
+│   └── analytics/          # Motores puros: trends, timeline, aml, reconciliation
 ├── application/
 │   ├── services.py         # BatchService: casos de uso, transacciones, locking
+│   ├── analytics.py        # AnalyticsService: resumen, línea de tiempo, AML, conciliación
 │   ├── dtos.py             # Commands de entrada y DTOs de salida (Pydantic)
 │   └── ports.py            # Protocols que la infraestructura implementa
 ├── infrastructure/         # App Django (label "ledger")
 │   ├── models.py           # ORM solo para persistencia + CHECK constraints
-│   ├── repositories.py     # DjangoBatchRepository + mapeo entidad <-> modelo
+│   ├── repositories.py     # DjangoBatchRepository + proyección a la tabla de transacciones
+│   ├── read_models.py      # Consultas de analítica sobre las transacciones
 │   ├── migrations/
 │   └── analysis/           # Parser CSV, identificación de columnas y analizador pandas
 │       ├── column_mapping.py        # Modelo TF-IDF + perfilado de valores
-│       └── column_vocabulary.json   # Datos de entrenamiento: nombres conocidos por campo
+│       ├── column_vocabulary.json   # Datos de entrenamiento: nombres conocidos por campo
+│       ├── directions.py            # Ingreso/egreso: columna de tipo o signo declarado
+│       └── ledger_parser.py         # Lector del libro contable del ERP
 └── presentation/
     ├── composition.py      # Composition root (único sitio que conoce adaptadores)
     ├── api/                # Views, URLs, middleware de errores, problem+json
-    ├── web/                # Frontend: login, listado, subida, detalle, aprobar/rechazar
+    ├── web/                # Frontend: lotes, analítica y Chart.js incluido en vendor/
     ├── templates/          # Plantillas Django (HTML + CSS en línea, sin build)
-    └── management/commands/  # simulate_concurrent_approval, create_demo_users
+    └── management/commands/  # simulate_concurrent_approval, create_demo_users, load_demo_analytics
 ```
 
 La dirección de las dependencias es siempre hacia dentro y **se verifica con tests** (`tests/architecture/test_layers.py`, que analiza los imports con `ast`). Si alguien importa Django o pandas desde el dominio, CI falla.
@@ -339,7 +350,74 @@ Cuando la columna no permite decidir, se aplica una política deliberadamente di
 
 Nada se pierde: cada fila guarda en `original_values` lo que decía el archivo en los campos convertidos, y el aprobador ve ambos valores. El formato detectado se guarda en el mapeo de columnas (`value_format`, `format_ambiguous`). Años de dos dígitos (`01/09/26`) no se interpretan: su siglo es otra suposición.
 
-## 6. Ejecución con Docker
+### Ingresos y egresos
+
+Cada movimiento es un **ingreso** o un **egreso** desde el punto de vista de la organización. El sentido solo sale de algo explícito:
+
+1. **Una columna de tipo**, reconocida por el mismo modelo de cabeceras (`Tipo`, `Tipo de movimiento`, `Naturaleza`, `D/C`…). Sus valores se leen como en un extracto: `Egreso`, `Salida`, `Cargo`, `Débito`, `D`, `Pago` → egreso; `Ingreso`, `Entrada`, `Abono`, `Crédito`, `C`, `Cobro` → ingreso. Un valor que no se entiende bloquea la fila (`INVALID_DIRECTION`).
+2. **Importes con signo**, si quien sube el archivo lo declara (casilla al subir, o `signed_amounts=true` en la API): negativo = egreso.
+3. **Ninguno de los dos**: el lote es de pagos y todo es egreso, como hasta ahora.
+
+**El signo nunca decide por sí solo.** En un lote de pagos, un `-40.00` es mucho más probablemente un error que un cobro. Convertirlo en ingreso escondería el error, así que sin declaración sigue siendo negativo y el análisis lo rechaza. Si la columna de tipo dice egreso y el importe es negativo, el signo concuerda y se quita. Si dice ingreso, es una contradicción y se rechaza.
+
+El análisis separa los totales en ingresos y egresos por divisa, y calcula los atípicos por divisa **y** sentido: un cobro grande no es un atípico de los pagos.
+
+## 6. Analítica
+
+Menú **Analítica** en la web y `/api/v1/analytics/` en la API. Trabaja sobre una **tabla de transacciones** (`ledger_transaction`): cada movimiento válido de un lote se guarda ahí al analizarlo, en la misma transacción que el lote. Una migración rellenó el histórico. Por defecto solo cuentan los lotes **aprobados**; un filtro permite incluir los pendientes. Todos los filtros (fechas, divisa, cuenta) son comunes a las cuatro pantallas, y cada una se descarga en CSV.
+
+Los cálculos son **Python puro en el dominio** (`ledger/domain/analytics/`), con `Decimal` para el dinero y 100 % de cobertura de tests. Las divisas nunca se mezclan ni se convierten: cada una tiene sus totales y su gráfico.
+
+| Pantalla | Qué muestra |
+|---|---|
+| **Resumen y tendencias** | Ingresos, egresos, neto y nº de movimientos por divisa. Gráfico por día, semana o mes (los periodos vacíos cuentan como cero). Variación del último periodo frente al anterior y a la media de los tres previos. Las 10 cuentas con más movimiento. |
+| **Línea de tiempo** | Flujo neto acumulado día a día (por fecha valor) y una cronología que junta los movimientos de cada día con quién subió, aprobó o rechazó cada lote. Filtrando por cuenta, es la historia de esa cuenta. |
+| **Patrones de blanqueo** | Alertas de seis reglas explicables, ordenadas por severidad, con los movimientos implicados y una frase que dice por qué saltaron. |
+| **Conciliación con el ERP** | Cruce de lo aprobado con el libro contable del ERP (ver abajo). |
+
+### Patrones de blanqueo (AML)
+
+Reglas por cuenta y divisa, con umbrales ajustables en `AmlPolicy` (`ledger/domain/analytics/aml.py`). El umbral de declaración por defecto equivale a unos 10.000 USD (10.000 EUR, 180.000 MXN, 40.000.000 COP…):
+
+| Regla | Salta cuando… | Severidad |
+|---|---|---|
+| Fraccionamiento (*pitufeo*) | ≥ 3 importes entre el 80 % y el 100 % del umbral en 7 días | Alta si juntos superan el umbral |
+| Cuenta de paso | Entra ≥ 50 % del umbral y sale ≥ 90 % de eso en 3 días | Alta |
+| Pico de actividad | El volumen de un mes supera 5 veces la mediana de los meses anteriores (≥ 3 meses de historia) | Media |
+| Muchos movimientos en un día | Más de 10 movimientos de la cuenta en un día | Media |
+| Pago repetido entre lotes | El mismo egreso (cuenta e importe) en lotes distintos con ≤ 7 días de diferencia | Media |
+| Importes redondos | ≥ 60 % de los movimientos (mínimo 3) son múltiplos exactos de umbral/10 | Baja |
+
+**Son indicios, no conclusiones.** Cualquier negocio legítimo puede activar una regla; la decisión de investigar o reportar es siempre de una persona. Se eligieron reglas en vez de un modelo opaco precisamente para que cada alerta se pueda explicar y discutir.
+
+### Conciliación con el libro contable del ERP
+
+Se sube la exportación del **mayor de la cuenta de bancos** (p. ej. la 572 del PGC) y se cruza con los movimientos aprobados de las mismas fechas (± la tolerancia) y divisas:
+
+1. **Por referencia**: el documento o referencia del apunte coincide con el `external_id`. Si coincide pero difieren el importe, la divisa, el sentido o la fecha (más allá de la tolerancia), es una **discrepancia**: no se empareja en silencio.
+2. **Por importe y fecha**: los apuntes sin referencia útil se emparejan con un movimiento del mismo importe, divisa y sentido dentro de la tolerancia (gana la fecha más cercana).
+
+Cada movimiento se usa una sola vez. El resultado tiene cuatro listas: **conciliados**, **discrepancias**, **aprobados sin contabilizar** y **contabilizados sin lote**. A esas se suman las líneas del archivo que no se pudieron leer, cada una con su motivo, sin que eso detenga el resto. Un movimiento de justo antes del periodo del archivo puede conciliarse gracias a la tolerancia, pero si no concilia no se reporta como pendiente: pertenece al mayor del periodo anterior.
+
+El archivo se lee con el mismo modelo de columnas y la misma normalización de formatos que los lotes. Admite:
+
+- columnas **Debe/Haber**;
+- un importe más una columna **D/H** (o Debe/Haber, Cargo/Abono);
+- un **importe con signo** (positivo = Debe).
+
+En la cuenta de bancos, **Debe = entra dinero** y **Haber = sale**. Si se exporta la cuenta de proveedores o clientes, se marca *Invertir Debe/Haber*. Con un único importe sin signo ni columna de tipo, el sistema se niega a adivinar y pide el dato que falta. Sin columna de divisa, se usa la elegida al subir.
+
+### Datos de demo
+
+`samples/analitica/` trae seis lotes mensuales (abril–septiembre 2026, ~1.600 movimientos, en EUR y USD) y el mayor de bancos de septiembre. Tienen **plantado un caso de cada patrón** de blanqueo y, en el mayor, diferencias conocidas: un importe distinto, dos pagos sin contabilizar, una comisión y una transferencia sin lote, apuntes sin referencia y una línea ilegible. Para cargarlos (los sube `alice` y los aprueba `bob`, con fechas de cada mes):
+
+```bash
+docker compose exec web python manage.py load_demo_analytics
+```
+
+Luego sube `samples/analitica/erp_mayor_bancos_2026_09.csv` en *Analítica → Conciliación con el ERP*. Los regenera `scripts/generate_demo_analytics.py`, con semilla fija. En Codespaces la demo se carga sola al arrancar.
+
+## 7. Ejecución con Docker
 
 Requisitos: Docker con Compose v2.
 
@@ -376,7 +454,7 @@ El repo incluye un `.devcontainer/`, así que puedes tener un entorno funcionand
 
 1. Pulsa el botón **Open in GitHub Codespaces** de arriba (o *Code → Codespaces → Create codespace*).
 2. Al arrancar, el codespace ejecuta `docker compose up` solo: PostgreSQL + la aplicación ya migrada en el puerto `8000`. La primera vez tarda unos minutos porque construye las imágenes.
-3. Se abre el navegador con la web (si no, pestaña **Ports** → puerto 8000). Entra con `alice` / `demo1234`, sube `samples/banco_es.csv` y apruébalo después como `bob`.
+3. Se abre el navegador con la web (si no, pestaña **Ports** → puerto 8000). Entra con `alice` / `demo1234`, sube `samples/banco_es.csv` y apruébalo después como `bob`. La [demo de analítica](#datos-de-demo) ya está cargada: mira el menú **Analítica**.
 4. La API está en la misma URL, bajo `/api/v1/`. Para llamarla desde fuera del navegador (Postman, curl en tu máquina), cambia la visibilidad del puerto a *Public*.
 5. Desde la terminal del codespace puedes lanzar todo tal cual:
 
@@ -386,7 +464,7 @@ docker compose exec web python manage.py simulate_concurrent_approval
 docker compose --profile test run --rm tests
 ```
 
-## 7. API
+## 8. API
 
 Base: `/api/v1`. La API no incluye autenticación (fuera del alcance de la demo): el actor se envía explícitamente en el payload. El login protege el frontend web. Proteger también la API, con tokens o sesión, es un cambio pendiente si esto se expone.
 
@@ -399,6 +477,12 @@ Base: `/api/v1`. La API no incluye autenticación (fuera del alcance de la demo)
 | `POST` | `/batches/{id}/process/` | | `200` `PENDING_APPROVAL` o `REJECTED` / `409` |
 | `POST` | `/batches/{id}/approve/` | `{"approver": "bob"}` | `200` / `400` / `409` |
 | `POST` | `/batches/{id}/reject/` | `{"reviewer": "bob", "reason": "..."}` | `200` / `400` / `409` |
+| `GET` | `/analytics/overview/` | query: `date_from`, `date_to`, `currency`, `account`, `include_pending`, `granularity` (`DAY`/`WEEK`/`MONTH`) | `200` totales, serie, tendencias, cuentas / `400` |
+| `GET` | `/analytics/timeline/` | mismos filtros | `200` días con flujo acumulado + cronología |
+| `GET` | `/analytics/aml/` | mismos filtros | `200` alertas con movimientos y umbrales |
+| `POST` | `/analytics/reconciliation/` | multipart: `file` (mayor del ERP), `default_currency`, `invert_debit_credit`, `date_tolerance_days` | `200` conciliados, discrepancias y pendientes de cada lado / `400` |
+
+`POST /batches/` acepta además `signed_amounts=true` (ver [Ingresos y egresos](#ingresos-y-egresos)).
 
 Formato del CSV (ver `samples/`). Las cabeceras pueden llamarse distinto: ver [Identificación de columnas](#identificación-de-columnas-modelo-de-vectores). La respuesta incluye `column_mapping` con la columna elegida para cada campo.
 
@@ -421,14 +505,15 @@ curl -X POST http://localhost:8000/api/v1/batches/<id>/process/
 curl -H "Content-Type: application/json" -d '{"approver":"bob"}' http://localhost:8000/api/v1/batches/<id>/approve/
 ```
 
-## 8. Tests y CI
+## 9. Tests y CI
 
 ```
 tests/
-├── unit/domain/          # máquina de estados, transiciones válidas/inválidas, guards, excepciones
-├── unit/infrastructure/  # parser CSV, identificación de columnas y analizador pandas (sin BD)
+├── unit/domain/          # máquina de estados, guards, excepciones y motores de analítica
+├── unit/application/     # AnalyticsService con dobles en memoria
+├── unit/infrastructure/  # parser CSV, columnas, formatos, ingreso/egreso, mayor del ERP (sin BD)
 ├── unit/test_middleware.py
-├── integration/          # casos de uso, repositorio, constraints, API, web y concurrencia (PostgreSQL)
+├── integration/          # casos de uso, repositorio, constraints, API, web, analítica y concurrencia (PostgreSQL)
 └── architecture/         # reglas de dependencias entre capas
 ```
 
@@ -454,10 +539,12 @@ pytest
 2. **tests**: PostgreSQL como service container; comprueba que las migraciones están sincronizadas (`makemigrations --check`), ejecuta pytest con cobertura de ramas y **exige 100 % en dominio y aplicación**.
 3. **docker**: `docker compose up --wait`, smoke test end-to-end con `curl`, la demo de concurrencia y la suite completa dentro de la imagen de test.
 
-## 9. Decisiones y trade-offs
+## 10. Decisiones y trade-offs
 
 - **Django sin DRF.** Los DTOs y la validación ya son Pydantic v2. Añadir los serializers de DRF duplicaría los esquemas, así que las vistas se limitan a traducir HTTP ↔ commands/DTOs.
 - **La capa de aplicación importa `django.db.transaction` y nada más de Django.** Un puerto Unit-of-Work añadiría indirección sin aportar valor en un servicio con una sola base de datos. La excepción está acotada y verificada por un test de arquitectura.
 - **Entidad Pydantic + máquina de estados enlazada al modelo.** `BatchLifecycle` lee y escribe `batch.status` directamente (`state_field="status"`), así que no hay una segunda copia del estado que pueda desincronizarse. La máquina se crea por operación: es barata y no tiene estado propio.
 - **Un lote atascado en `PROCESSING` es intencionado.** Si el análisis falla por un error inesperado, la excepción se propaga y el lote queda visible en `PROCESSING`, en vez de revertirse en silencio o rechazarse como si fuera culpa del usuario. En producción este paso sería una tarea asíncrona (Celery/RQ) con reintentos y una alerta por antigüedad en `PROCESSING`.
-- **Datos crudos en JSONB.** Las filas se guardan tal como llegaron, salvo importes y fechas en formato local, que se convierten al canónico conservando el valor original en `original_values` (auditoría). Si hiciera falta consultar transacciones individuales, se añadiría una tabla normalizada al aprobar.
+- **Datos crudos en JSONB + tabla de transacciones para consultar.** Las filas del lote se guardan en JSONB tal como llegaron, salvo importes y fechas en formato local, que se convierten al canónico conservando el valor original en `original_values` (auditoría). Los movimientos válidos se proyectan además en `ledger_transaction`, con tipos reales e índices por fecha, cuenta y divisa, para la analítica. La proyección se escribe una vez, en la misma transacción que el análisis del lote.
+- **La analítica calcula en Python, no en SQL.** El modelo de lectura trae los movimientos filtrados y los motores del dominio hacen el resto. Es explicable, portable y 100 % testeable sin base de datos, y con ~10.000 movimientos responde en unos 0,3 s. Con millones de movimientos convendría empujar las agregaciones de tendencias a SQL (`GROUP BY` por periodo) y dejar en Python solo las reglas AML por cuenta.
+- **Chart.js incluido en el repositorio** (`ledger/presentation/web/vendor/`, licencia MIT), servido por la app con caché larga, en vez de un CDN: los gráficos funcionan sin internet y tras proxies corporativos. Cada gráfico tiene además su tabla de datos.

@@ -22,7 +22,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ledger.domain.value_objects import Direction, Transaction
+from ledger.domain.value_objects import ColumnMapping, Direction, Transaction
 
 
 class LedgerEntry(BaseModel):
@@ -37,6 +37,25 @@ class LedgerEntry(BaseModel):
     entry_date: date
     direction: Direction
     description: str = ""
+
+
+class LedgerProblem(BaseModel):
+    """A line of the ERP export that could not be read as an entry."""
+
+    model_config = ConfigDict(frozen=True)
+
+    row_number: int = Field(ge=1)
+    message: str
+
+
+class ParsedLedger(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    entries: tuple[LedgerEntry, ...]
+    problems: tuple[LedgerProblem, ...] = ()
+    column_mapping: ColumnMapping
+    # How debit/credit was turned into inflow/outflow, shown to the user.
+    direction_rule: str
 
 
 class MatchKind(StrEnum):

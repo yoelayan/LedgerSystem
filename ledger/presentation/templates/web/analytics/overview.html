@@ -1,0 +1,95 @@
+{% extends "web/base.html" %}
+{% load ledger_ui %}
+{% block title %}Analítica{% endblock %}
+{% block head %}{% include "web/analytics/_chart_setup.html" %}{% endblock %}
+{% block content %}
+<h1>Analítica</h1>
+{% include "web/analytics/_tabs.html" %}
+{% with show_granularity=True %}{% include "web/analytics/_filters.html" %}{% endwith %}
+
+{% if not result.transaction_count %}
+  <div class="card"><p class="muted">No hay movimientos con estos filtros. Aprueba algún lote o marca "Incluir pendientes de aprobación".</p></div>
+{% else %}
+  {% for currency, totals in result.summary.items %}
+    <h2>{{ currency }}</h2>
+    <div class="tiles">
+      <div class="tile"><div class="label">Ingresos</div><div class="value">{{ totals.inflow|money }}</div></div>
+      <div class="tile"><div class="label">Egresos</div><div class="value">{{ totals.outflow|money }}</div></div>
+      <div class="tile"><div class="label">Neto</div><div class="value {% if totals.net < 0 %}neg{% else %}pos{% endif %}">{{ totals.net|money }}</div></div>
+      <div class="tile"><div class="label">Movimientos</div><div class="value">{{ totals.count }}</div></div>
+      {% for trend in result.trends %}{% if trend.currency == currency %}
+        <div class="tile">
+          <div class="label">Egresos del último {{ granularity_label|lower }} ({{ trend.period|date:"d/m/Y" }})</div>
+          <div class="value">{% if trend.outflow_change is not None %}{% if trend.outflow_change > 0 %}▲ +{% elif trend.outflow_change < 0 %}▼ {% endif %}{{ trend.outflow_change }} %{% else %}—{% endif %}</div>
+          <div class="hint">vs. anterior{% if trend.baseline_outflow is not None %} · media reciente {{ trend.baseline_outflow|money }}{% endif %}</div>
+        </div>
+        <div class="tile">
+          <div class="label">Ingresos del último {{ granularity_label|lower }}</div>
+          <div class="value">{% if trend.inflow_change is not None %}{% if trend.inflow_change > 0 %}▲ +{% elif trend.inflow_change < 0 %}▼ {% endif %}{{ trend.inflow_change }} %{% else %}—{% endif %}</div>
+          <div class="hint">vs. anterior{% if trend.baseline_inflow is not None %} · media reciente {{ trend.baseline_inflow|money }}{% endif %}</div>
+        </div>
+      {% endif %}{% endfor %}
+    </div>
+  {% endfor %}
+
+  {% for chart in charts %}
+    <section class="card viz">
+      <h2>Ingresos y egresos por {{ granularity_label|lower }} · {{ chart.currency }}</h2>
+      <div class="chart-box"><canvas id="flow-{{ chart.currency }}" aria-label="Ingresos, egresos y neto por periodo en {{ chart.currency }}" role="img"></canvas></div>
+      {{ chart|json_script:chart.element_id }}
+      <details>
+        <summary>Ver los datos en tabla</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Periodo</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Neto</th></tr></thead>
+          <tbody>
+            {% for p in result.series %}{% if p.currency == chart.currency %}
+              <tr><td>{{ p.period|date:"d/m/Y" }}</td><td class="num">{{ p.totals.inflow|money }}</td><td class="num">{{ p.totals.outflow|money }}</td><td class="num">{{ p.totals.net|money }}</td></tr>
+            {% endif %}{% endfor %}
+          </tbody>
+        </table></div>
+      </details>
+    </section>
+  {% endfor %}
+
+  <section class="card table-scroll">
+    <h2>Cuentas con más movimiento</h2>
+    <table>
+      <thead><tr><th>Cuenta</th><th>Divisa</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Movimientos</th></tr></thead>
+      <tbody>
+        {% for a in result.top_accounts %}
+          <tr>
+            <td><a href="{% url 'web:analytics-timeline' %}?account={{ a.account|urlencode }}&amp;currency={{ a.currency }}{% if form.data.include_pending %}&amp;include_pending=on{% endif %}">{{ a.account }}</a></td>
+            <td>{{ a.currency }}</td><td class="num">{{ a.totals.inflow|money }}</td><td class="num">{{ a.totals.outflow|money }}</td><td class="num">{{ a.totals.count }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endif %}
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (!window.Chart) return;  // offline: the tables below each chart still show the data
+    document.querySelectorAll('canvas[id^="flow-"]').forEach((canvas) => {
+      const currency = canvas.id.slice(5);
+      const data = JSON.parse(document.getElementById(`${currency}-flow-data`).textContent);
+      const c = vizColors(canvas.closest('.viz'));
+      new Chart(canvas, {
+        data: {
+          labels: data.labels,
+          datasets: [
+            { type: 'bar', label: 'Ingresos', data: data.inflow.map(Number), backgroundColor: c.inflow, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 28, order: 2 },
+            { type: 'bar', label: 'Egresos', data: data.outflow.map(Number), backgroundColor: c.outflow, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 28, order: 2 },
+            { type: 'line', label: 'Neto', data: data.net.map(Number), borderColor: c.net, backgroundColor: c.net, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0, order: 1 },
+          ],
+        },
+        options: (() => {
+          const o = vizBaseOptions(c, currency);
+          o.plugins.legend.labels.sort = (a, b) => a.datasetIndex - b.datasetIndex;  // legend in data order
+          return o;
+        })(),
+      });
+    });
+  });
+</script>
+{% endblock %}

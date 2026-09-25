@@ -77,9 +77,21 @@ def resolve_directions(
     )
 
 
+# Accounting sides: they mark a direction column too, although their meaning depends on
+# the account (see the ledger parser).
+_LEDGER_SIDE_WORDS: Final = frozenset({"debe", "haber", "h", "deudor", "acreedor"})
+
+
 def direction_share(values: Sequence[str]) -> float:
     """Fraction of values that read as a direction: evidence that a column holds them."""
     present = [v for v in values if v.strip()]
     if not present:
         return 0.0
-    return sum(parse_direction(v) is not None for v in present) / len(present)
+    return sum(_is_direction_marker(v) for v in present) / len(present)
+
+
+def _is_direction_marker(raw: str) -> bool:
+    return (
+        parse_direction(raw) is not None
+        or unidecode(raw).strip().lower().rstrip(".") in _LEDGER_SIDE_WORDS
+    )

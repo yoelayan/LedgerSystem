@@ -83,6 +83,8 @@ jobs:
         run: bash scripts/smoke_test.sh
       - name: Concurrent approval demo
         run: docker compose exec -T web python manage.py simulate_concurrent_approval
+      - name: Load the analytics demo data
+        run: docker compose exec -T web python manage.py load_demo_analytics
       - name: Test suite inside the test image
         run: docker compose --profile test run --rm tests pytest -q -p no:cacheprovider
       - name: Logs on failure

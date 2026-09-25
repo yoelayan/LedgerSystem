@@ -1,0 +1,20 @@
+<form method="get" class="card filters-form">
+  <p><label for="id_date_from">Desde</label><input type="date" name="date_from" id="id_date_from" value="{{ form.data.date_from|default:'' }}"></p>
+  <p><label for="id_date_to">Hasta</label><input type="date" name="date_to" id="id_date_to" value="{{ form.data.date_to|default:'' }}"></p>
+  <p><label for="id_currency">Divisa</label>
+    <select name="currency" id="id_currency">
+      {% for value, label in form.fields.currency.choices %}<option value="{{ value }}" {% if form.data.currency == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></p>
+  <p><label for="id_account">Cuenta</label><input type="text" name="account" id="id_account" placeholder="IBAN o cuenta" value="{{ form.data.account|default:'' }}"></p>
+  {% if show_granularity %}
+  <p><label for="id_granularity">Agrupar por</label>
+    <select name="granularity" id="id_granularity">
+      {% for value, label in form.fields.granularity.choices %}<option value="{{ value }}" {% if form.data.granularity == value or not form.data.granularity and value == 'MONTH' %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></p>
+  {% endif %}
+  <p><label style="font-weight: normal;"><input type="checkbox" name="include_pending" {% if form.data.include_pending %}checked{% endif %}> Incluir pendientes de aprobación</label></p>
+  <p><button class="btn primary" type="submit">Aplicar</button>
+     <a class="btn" href="?{% if request.GET %}{{ request.GET.urlencode }}&amp;{% endif %}format=csv">Descargar CSV</a></p>
+  {% if form.errors %}<p class="errorlist" style="flex-basis: 100%;">Revisa los filtros: {% for field, errs in form.errors.items %}{{ errs|join:" " }} {% endfor %}</p>{% endif %}
+</form>
+<p class="muted">Se analizan los movimientos válidos de los lotes <strong>aprobados</strong>{% if form.data.include_pending %} y <strong>pendientes de aprobación</strong>{% endif %}. Los importes están siempre en su divisa: no se convierten.</p>

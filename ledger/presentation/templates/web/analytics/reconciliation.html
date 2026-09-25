@@ -1,0 +1,126 @@
+{% extends "web/base.html" %}
+{% load ledger_ui %}
+{% block title %}Conciliación con el ERP{% endblock %}
+{% block content %}
+<h1>Analítica</h1>
+{% include "web/analytics/_tabs.html" %}
+
+<div class="grid">
+  <div class="card">
+    <h2>Conciliar con el libro contable</h2>
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <p><label for="id_file">{{ form.file.label }}</label>
+        <input type="file" name="file" id="id_file" accept=".csv,text/csv" required>{{ form.file.errors }}</p>
+      <p><label for="id_default_currency">{{ form.default_currency.label }}</label>
+        <select name="default_currency" id="id_default_currency" style="padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit;">
+          {% for value, label in form.fields.default_currency.choices %}<option value="{{ value }}" {% if form.default_currency.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></p>
+      <p><label for="id_date_tolerance_days">{{ form.date_tolerance_days.label }}</label>
+        <input type="text" inputmode="numeric" name="date_tolerance_days" id="id_date_tolerance_days" value="{{ form.date_tolerance_days.value|default_if_none:3 }}" style="max-width: 100px;">{{ form.date_tolerance_days.errors }}</p>
+      <p><label style="font-weight: normal;"><input type="checkbox" name="invert_debit_credit" {% if form.invert_debit_credit.value %}checked{% endif %}> {{ form.invert_debit_credit.label }}</label></p>
+      <button class="btn primary" type="submit">Conciliar</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Cómo funciona</h2>
+    <p class="muted">Sube la exportación del <strong>mayor de la cuenta de bancos</strong> (p. ej. 572). Se cruza con los movimientos de los lotes <strong>aprobados</strong> de las mismas fechas y divisas:</p>
+    <ol class="muted">
+      <li><strong>Por referencia</strong>: el documento o referencia del apunte coincide con el ID de la transacción. Si coincide pero cambia el importe, la divisa, el sentido o la fecha, se marca como <em>discrepancia</em>.</li>
+      <li><strong>Por importe y fecha</strong>: sin referencia útil, mismo importe, divisa y sentido dentro de la tolerancia de días (la fecha más cercana gana).</li>
+    </ol>
+    <p class="muted">Formatos: columnas <code>Debe</code>/<code>Haber</code>, una columna <code>D/H</code> o un importe con signo. En la cuenta de bancos, Debe = entra dinero y Haber = sale.</p>
+  </div>
+</div>
+
+{% if result %}
+  {% with r=result.result %}
+  <div class="tiles">
+    <div class="tile"><div class="label">Conciliados</div><div class="value pos">{{ r.matches|length }}</div></div>
+    <div class="tile"><div class="label">Discrepancias</div><div class="value {% if r.discrepancies %}neg{% endif %}">{{ r.discrepancies|length }}</div></div>
+    <div class="tile"><div class="label">Aprobados sin contabilizar</div><div class="value {% if r.only_in_ledgersystem %}neg{% endif %}">{{ r.only_in_ledgersystem|length }}</div><div class="hint">en LedgerSystem, no en el ERP</div></div>
+    <div class="tile"><div class="label">Contabilizados sin lote</div><div class="value {% if r.only_in_erp %}neg{% endif %}">{{ r.only_in_erp|length }}</div><div class="hint">en el ERP, no en LedgerSystem</div></div>
+    <div class="tile"><div class="label">Líneas no legibles</div><div class="value {% if result.problems %}neg{% endif %}">{{ result.problems|length }}</div></div>
+  </div>
+
+  <div class="card">
+    <p>{% if r.is_balanced and not result.problems %}<span class="badge ok">✓ Conciliado</span> Todo lo aprobado está contabilizado y todo lo contabilizado tiene lote.
+       {% else %}<span class="badge warn">! Revisar</span> Hay diferencias entre LedgerSystem y el ERP.{% endif %}</p>
+    <p class="muted">{{ result.ledger_entries }} apuntes del ERP comparados con los movimientos aprobados del {{ result.period_from|date:"d/m/Y" }} al {{ result.period_to|date:"d/m/Y" }} (fechas del archivo ± {{ result.date_tolerance_days }} días).
+      Debe/Haber: {{ result.direction_rule }}.
+      Columnas: {% for m in result.column_mapping.matches %}<code>{{ m.source_column }}</code> → {{ field_labels|get:m.field }}{% if not forloop.last %}, {% endif %}{% endfor %}.</p>
+    <a class="btn" download="conciliacion.csv" href="data:text/csv;charset=utf-8,{{ report_csv|urlencode }}">Descargar informe CSV</a>
+  </div>
+
+  {% if discrepancies %}
+  <section class="card table-scroll">
+    <h2>Discrepancias</h2>
+    <table>
+      <thead><tr><th>Referencia</th><th>Difiere en</th><th>LedgerSystem</th><th>ERP (línea)</th></tr></thead>
+      <tbody>
+        {% for d, what in discrepancies %}
+          <tr><td>{{ d.transaction.external_id }}</td><td><strong>{{ what }}</strong></td>
+            <td>{{ d.transaction.amount|money }} {{ d.transaction.currency }} · {{ d.transaction.direction|label:direction_labels }} · {{ d.transaction.value_date|date:"d/m/Y" }} · <a href="{% url 'web:batch-detail' d.transaction.batch_id %}">lote</a></td>
+            <td>{{ d.entry.amount|money }} {{ d.entry.currency }} · {{ d.entry.direction|label:direction_labels }} · {{ d.entry.entry_date|date:"d/m/Y" }} ({{ d.entry.row_number }})</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if r.only_in_ledgersystem %}
+  <section class="card table-scroll">
+    <h2>Aprobados sin contabilizar ({{ r.only_in_ledgersystem|length }})</h2>
+    <table>
+      <thead><tr><th>Fecha valor</th><th>Referencia</th><th>Cuenta</th><th>Tipo</th><th class="num">Importe</th><th>Lote</th></tr></thead>
+      <tbody>
+        {% for t in r.only_in_ledgersystem %}
+          <tr><td>{{ t.value_date|date:"d/m/Y" }}</td><td>{{ t.external_id }}</td><td>{{ t.account }}</td><td>{{ t.direction|label:direction_labels }}</td><td class="num">{{ t.amount|money }} {{ t.currency }}</td><td><a href="{% url 'web:batch-detail' t.batch_id %}">ver</a></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if r.only_in_erp %}
+  <section class="card table-scroll">
+    <h2>Contabilizados sin lote aprobado ({{ r.only_in_erp|length }})</h2>
+    <table>
+      <thead><tr><th>Línea</th><th>Fecha</th><th>Referencia</th><th>Concepto</th><th>Tipo</th><th class="num">Importe</th></tr></thead>
+      <tbody>
+        {% for e in r.only_in_erp %}
+          <tr><td class="num">{{ e.row_number }}</td><td>{{ e.entry_date|date:"d/m/Y" }}</td><td>{{ e.reference|default:"—" }}</td><td>{{ e.description }}</td><td>{{ e.direction|label:direction_labels }}</td><td class="num">{{ e.amount|money }} {{ e.currency }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if result.problems %}
+  <section class="card table-scroll">
+    <h2>Líneas del ERP no legibles</h2>
+    <table>
+      <thead><tr><th>Línea</th><th>Problema</th></tr></thead>
+      <tbody>{% for p in result.problems %}<tr><td class="num">{{ p.row_number }}</td><td>{{ p.message }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <section class="card table-scroll">
+    <details><summary>Ver los {{ r.matches|length }} conciliados</summary>
+      <table>
+        <thead><tr><th>Referencia</th><th>Cómo</th><th class="num">Importe</th><th>Fecha valor → apunte</th></tr></thead>
+        <tbody>
+          {% for m in r.matches %}
+            <tr><td>{{ m.transaction.external_id }}{% if m.entry.reference and m.entry.reference != m.transaction.external_id %} / {{ m.entry.reference }}{% endif %}</td>
+              <td>{{ m.kind|label:match_kind_labels }}</td><td class="num">{{ m.entry.amount|money }} {{ m.entry.currency }}</td>
+              <td>{{ m.transaction.value_date|date:"d/m/Y" }} → {{ m.entry.entry_date|date:"d/m/Y" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </section>
+  {% endwith %}
+{% endif %}
+{% endblock %}
