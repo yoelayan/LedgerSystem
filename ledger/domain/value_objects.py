@@ -24,10 +24,12 @@ class BatchStatus(StrEnum):
 
 
 class RawTransactionRow(BaseModel):
-    """A dataset row exactly as received.
+    """A dataset row, with amounts and dates rewritten in the canonical format.
 
     Values are deliberately kept as strings: detecting bad amounts, dates or currencies is
     the job of the analysis step, which must *report* them instead of refusing the upload.
+    Whatever the ingestion rewrote ("1.250,50" -> "1250.50") keeps its value as received in
+    `original_values`, so the batch remains auditable against the source file.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -38,6 +40,7 @@ class RawTransactionRow(BaseModel):
     amount: str
     currency: str
     value_date: str
+    original_values: dict[str, str] = Field(default_factory=dict)
 
 
 class MatchMethod(StrEnum):
@@ -56,6 +59,11 @@ class ColumnMatch(BaseModel):
     source_column: str
     method: MatchMethod
     confidence: float = Field(ge=0, le=1)
+    # Format the values were converted from, e.g. "1.234,56" or "DD/MM/AAAA"; None when they
+    # already were canonical.
+    value_format: str | None = None
+    # More than one format fitted every value and the most common convention was assumed.
+    format_ambiguous: bool = False
 
 
 class ColumnMapping(BaseModel):

@@ -100,6 +100,27 @@ class TestUpload:
         assert mapping.column_for("amount") == "Importe"
         assert "Nombre conocido" in response.content.decode()
 
+    def test_local_formats_are_converted_and_shown(self, alice: Client) -> None:
+        with open("samples/banco_es.csv", "rb") as sample:
+            response = _upload(alice, sample.read())
+
+        batch = response.context["batch"]
+        assert batch.status == "PENDING_APPROVAL"
+        assert batch.rows[0].amount == "1250.00"
+        page = response.content.decode()
+        assert "1.234,56" in page
+        assert "DD/MM/AAAA" in page
+        assert "1.250,00" in page  # the value as received stays visible
+
+    def test_ambiguous_dates_are_flagged(self, alice: Client) -> None:
+        content = (
+            b"external_id,account,amount,currency,value_date\nTX-1,ACC-1,10.00,USD,03/04/2026\n"
+        )
+
+        response = _upload(alice, content)
+
+        assert "se asumió día/mes" in response.content.decode()
+
     def test_blocking_errors_reject_automatically(self, alice: Client) -> None:
         response = _upload(alice, DIRTY_CSV)
 

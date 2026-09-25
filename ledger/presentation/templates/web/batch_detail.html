@@ -60,7 +60,7 @@
 <section class="card table-scroll">
   <h2>Columnas identificadas</h2>
   <table>
-    <thead><tr><th>Campo</th><th>Columna del archivo</th><th>Cómo se identificó</th><th>Confianza</th></tr></thead>
+    <thead><tr><th>Campo</th><th>Columna del archivo</th><th>Cómo se identificó</th><th>Confianza</th><th>Formato convertido</th></tr></thead>
     <tbody>
       {% for m in batch.column_mapping.matches %}
         <tr>
@@ -68,6 +68,14 @@
           <td><code>{{ m.source_column }}</code></td>
           <td>{{ m.method|label:method_labels }}</td>
           <td><span class="meter"><span style="width: {{ m.confidence|percent }}"></span></span>{{ m.confidence|percent }}</td>
+          <td>
+            {% if m.value_format %}
+              <code>{{ m.value_format }}</code>
+              {% if m.format_ambiguous %}
+                <span class="badge warn" title="Todas las fechas encajan tanto en día/mes como en mes/día">Ambiguo: se asumió día/mes</span>
+              {% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
         </tr>
       {% endfor %}
     </tbody>
@@ -103,7 +111,9 @@
       {% for row, severity in rows %}
         <tr class="{{ severity }}">
           <td class="num">{{ row.row_number }}</td><td>{{ row.external_id }}</td><td>{{ row.account }}</td>
-          <td class="num">{{ row.amount }}</td><td>{{ row.currency }}</td><td>{{ row.value_date }}</td>
+          <td class="num">{{ row.amount }}{% if row.original_values.amount %}<br><small class="muted" title="Valor en el archivo">{{ row.original_values.amount }}</small>{% endif %}</td>
+          <td>{{ row.currency }}</td>
+          <td>{{ row.value_date }}{% if row.original_values.value_date %}<br><small class="muted" title="Valor en el archivo">{{ row.original_values.value_date }}</small>{% endif %}</td>
         </tr>
       {% endfor %}
     </tbody>

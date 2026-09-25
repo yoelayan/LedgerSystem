@@ -30,7 +30,10 @@
       {% for key, label in fields.items %}<li>{{ label }} <span class="muted">(<code>{{ key }}</code>)</span></li>{% endfor %}
     </ul>
     <p class="muted">Separador <code>,</code> <code>;</code> tabulador o <code>|</code>, en UTF-8.
-      Importes con punto decimal (<code>1250.50</code>) y fechas <code>AAAA-MM-DD</code>.</p>
+      Importes como <code>1.250,50</code>, <code>1,250.50</code> o <code>1250.50 €</code> y fechas como
+      <code>01/09/2026</code> o <code>2026-09-01</code>: el formato se detecta por columna y verás cuál se usó.
+      Si una columna no permite decidirlo (p. ej. solo <code>1,250</code>), esos importes se marcan como error
+      en lugar de adivinar.</p>
   </div>
 </div>
 {% endblock %}

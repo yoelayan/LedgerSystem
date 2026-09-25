@@ -131,3 +131,28 @@ def test_unidentified_columns_list_what_the_file_has() -> None:
 def test_unknown_delimiter_falls_back_to_comma() -> None:
     with pytest.raises(MalformedDatasetError):
         parser.parse(b"justonecolumn\nvalue\n")
+
+
+def test_local_formats_are_normalised_and_the_originals_kept() -> None:
+    content = (
+        b"Referencia;Cuenta;Importe;Moneda;Fecha\n"
+        b"OP-1;ES9121000418450200051332;1.250,50;EUR;01/09/2026\n"
+        b"OP-2;ES9121000418450200051332;980,00;EUR;15/09/2026\n"
+    )
+
+    dataset = parser.parse(content)
+
+    first, second = dataset.rows
+    assert (first.amount, first.value_date) == ("1250.50", "2026-09-01")
+    assert first.original_values == {"amount": "1.250,50", "value_date": "01/09/2026"}
+    assert second.original_values == {"amount": "980,00", "value_date": "15/09/2026"}
+    formats = {m.field: m.value_format for m in dataset.column_mapping.matches}
+    assert formats["amount"] == "1.234,56"
+    assert formats["currency"] is None
+
+
+def test_canonical_files_are_not_rewritten() -> None:
+    dataset = parser.parse(CLEAN_CSV)
+
+    assert all(row.original_values == {} for row in dataset.rows)
+    assert all(m.value_format is None for m in dataset.column_mapping.matches)

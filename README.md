@@ -21,6 +21,7 @@ Un usuario sube un CSV de transacciones desde la **web** (o la API). Un pequeño
 4. [Concurrencia y consistencia](#4-concurrencia-y-consistencia)
 5. [Análisis de datos con pandas](#5-análisis-de-datos-con-pandas)
    - [Identificación de columnas](#identificación-de-columnas-modelo-de-vectores)
+   - [Formatos locales de importes y fechas](#formatos-locales-de-importes-y-fechas)
 6. [Ejecución con Docker](#6-ejecución-con-docker)
    - [Frontend web](#frontend-web)
 7. [API](#7-api)
@@ -225,7 +226,7 @@ docker compose exec web python manage.py simulate_concurrent_approval
 
 ## 5. Análisis de datos con pandas
 
-`PandasCsvParser` rechaza solo problemas **estructurales**: el archivo no es UTF-8, no es un CSV válido, no se pueden identificar las columnas, está vacío o es demasiado grande. Detecta el separador (`,` `;` tabulador `|`) y acepta el BOM que añade Excel. Los valores se guardan en crudo para que el análisis pueda **informar de todos los errores**, no solo del primero.
+`PandasCsvParser` rechaza solo problemas **estructurales**: el archivo no es UTF-8, no es un CSV válido, no se pueden identificar las columnas, está vacío o es demasiado grande. Detecta el separador (`,` `;` tabulador `|`) y acepta el BOM que añade Excel. Los valores que no se pueden interpretar se guardan tal cual, para que el análisis pueda **informar de todos los errores** y no solo del primero.
 
 `PandasTransactionAnalyzer` aplica reglas vectorizadas:
 
@@ -265,7 +266,25 @@ El resultado se **guarda con el lote y se muestra al aprobador**: qué columna s
 
 **Para enseñarle una cabecera nueva**, añádela a `column_vocabulary.json`; no hace falta tocar código. Del vocabulario se excluyeron a propósito términos como `saldo`, `debe`/`haber` o `precio`: se parecen a un importe, pero no son el importe de la transacción.
 
-> Los **valores** todavía tienen que venir en el formato canónico: importes con punto decimal (`1250.50`) y fechas `AAAA-MM-DD`. Un archivo con `1.250,50` o `01/09/2026` se identifica bien, pero el análisis marcará esas filas como error. Normalizar formatos locales es el siguiente paso natural.
+### Formatos locales de importes y fechas
+
+Una vez identificadas las columnas, `value_normalization.py` reescribe importes y fechas al formato que espera el análisis (`1250.50`, `2026-09-01`):
+
+| En el archivo | Queda como |
+|---|---|
+| `1.250,50` · `1 250,50` · `€ 1.250,50` · `1.250,50 EUR` | `1250.50` |
+| `1,250.50` · `12'345.60` · `USD 1,250.50` | `1250.50` / `12345.60` |
+| `(12,00)` (negativo contable) | `-12.00` (y el análisis lo marca como no positivo) |
+| `01/09/2026` · `1.9.2026` · `2026/09/01` · `2026-09-01 00:00:00` | `2026-09-01` |
+
+**El formato se decide por columna, no valor a valor.** `1.250` significa 1250 en una columna que también tiene `980,50`, y 1.25 en una que tiene `980.50`. Decidirlo valor a valor dejaría que un mismo archivo mezcle las dos lecturas.
+
+Cuando la columna no permite decidir, se aplica una política deliberadamente distinta para importes y para fechas:
+
+- **Importes: no se adivina.** Si todos los importes son del tipo `1,250` (¿mil doscientos cincuenta o uno con veinticinco?) o la columna mezcla ambos formatos, los valores se dejan tal cual y el análisis los marca como error. Leer un importe mil veces mayor no es un riesgo aceptable.
+- **Fechas: se asume día/mes y se avisa.** Si todas las fechas encajan en ambos órdenes (`03/04/2026`), se usa día/mes, la convención de Europa y Latinoamérica, y el detalle del lote muestra "Ambiguo: se asumió día/mes". Una fecha que no encaja en el formato mayoritario de su columna se deja tal cual y el análisis la marca.
+
+Nada se pierde: cada fila guarda en `original_values` lo que decía el archivo en los campos convertidos, y el aprobador ve ambos valores. El formato detectado se guarda en el mapeo de columnas (`value_format`, `format_ambiguous`). Años de dos dígitos (`01/09/26`) no se interpretan: su siglo es otra suposición.
 
 ## 6. Ejecución con Docker
 
@@ -288,8 +307,8 @@ bash scripts/smoke_test.sh
 Abre `http://localhost:8000` y entra con uno de los usuarios de demo: `alice`, `bob` o `carol`, con contraseña `demo1234` (configurable con `DEMO_USERS_PASSWORD`; en `DJANGO_ENV=production` no se crean).
 
 - **Lotes**: listado con filtro por estado.
-- **Subir CSV**: sube el archivo y lo analiza al momento. Prueba con `samples/banco_es.csv`, que usa `;` y cabeceras en español.
-- **Detalle**: resumen y totales por divisa, las **columnas identificadas** con su confianza, los problemas encontrados y las transacciones (filas con error o aviso resaltadas).
+- **Subir CSV**: sube el archivo y lo analiza al momento. Prueba con `samples/banco_es.csv`, que usa `;`, cabeceras en español, importes `1.250,00` y fechas `01/09/2026`.
+- **Detalle**: resumen y totales por divisa, las **columnas identificadas** con su confianza y el formato convertido, los problemas encontrados y las transacciones (filas con error o aviso resaltadas; bajo cada importe o fecha convertido, el valor original).
 - **Aprobar / Rechazar**: el actor es siempre el usuario con sesión iniciada. Quien sube un lote no puede aprobarlo (el botón aparece desactivado y el dominio lo rechaza igualmente). Rechazar exige motivo.
 
 Son plantillas Django renderizadas en el servidor, con CSS en línea: no hay paso de build ni dependencias de frontend. Usan los mismos casos de uso que la API.
@@ -384,4 +403,4 @@ pytest
 - **La capa de aplicación importa `django.db.transaction` y nada más de Django.** Un puerto Unit-of-Work añadiría indirección sin aportar valor en un servicio con una sola base de datos. La excepción está acotada y verificada por un test de arquitectura.
 - **Entidad Pydantic + máquina de estados enlazada al modelo.** `BatchLifecycle` lee y escribe `batch.status` directamente (`state_field="status"`), así que no hay una segunda copia del estado que pueda desincronizarse. La máquina se crea por operación: es barata y no tiene estado propio.
 - **Un lote atascado en `PROCESSING` es intencionado.** Si el análisis falla por un error inesperado, la excepción se propaga y el lote queda visible en `PROCESSING`, en vez de revertirse en silencio o rechazarse como si fuera culpa del usuario. En producción este paso sería una tarea asíncrona (Celery/RQ) con reintentos y una alerta por antigüedad en `PROCESSING`.
-- **Datos crudos en JSONB.** Las filas originales se guardan tal como llegaron (auditoría). Si hiciera falta consultar transacciones individuales, se añadiría una tabla normalizada al aprobar.
+- **Datos crudos en JSONB.** Las filas se guardan tal como llegaron, salvo importes y fechas en formato local, que se convierten al canónico conservando el valor original en `original_values` (auditoría). Si hiciera falta consultar transacciones individuales, se añadiría una tabla normalizada al aprobar.

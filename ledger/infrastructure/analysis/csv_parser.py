@@ -5,8 +5,10 @@ empty, too big). Row-level problems (bad amounts, duplicates...) are kept as raw
 so that the analysis step can report every one of them instead of failing on the first.
 
 Files do not need our exact layout: the delimiter is sniffed (`,` `;` tab `|`), a UTF-8
-BOM is accepted (Excel adds one), and a `ColumnMapper` works out which column holds each
-field ("Importe" -> amount, "Moneda" -> currency...).
+BOM is accepted (Excel adds one), a `ColumnMapper` works out which column holds each
+field ("Importe" -> amount, "Moneda" -> currency...), and local amount and date formats
+are rewritten into the canonical ones ("1.250,50" -> "1250.50", "01/09/2026" ->
+"2026-09-01"), keeping the values as received on each row.
 """
 
 import csv
@@ -19,6 +21,7 @@ from ledger.domain.exceptions import BatchTooLargeError, EmptyBatchError, Malfor
 from ledger.domain.value_objects import (
     MAX_ROWS_PER_BATCH,
     REQUIRED_COLUMNS,
+    ColumnMapping,
     ParsedDataset,
     RawTransactionRow,
 )
@@ -26,6 +29,11 @@ from ledger.infrastructure.analysis.column_mapping import (
     SAMPLE_SIZE,
     ColumnMapper,
     VectorColumnMapper,
+)
+from ledger.infrastructure.analysis.value_normalization import (
+    Normalisation,
+    normalise_amounts,
+    normalise_dates,
 )
 
 DELIMITERS: Final = ",;\t|"
@@ -76,11 +84,40 @@ class PandasCsvParser:
 
         selected = frame[[mapping.column_for(field) for field in REQUIRED_COLUMNS]]
         selected.columns = list(REQUIRED_COLUMNS)
+        records = selected.to_dict(orient="records")
+        normalisations = {
+            "amount": normalise_amounts([r["amount"] for r in records]),
+            "value_date": normalise_dates([r["value_date"] for r in records]),
+        }
         rows = tuple(
-            RawTransactionRow(row_number=position, **record)
-            for position, record in enumerate(selected.to_dict(orient="records"), start=1)
+            _row(position, record, {f: n.values[position - 1] for f, n in normalisations.items()})
+            for position, record in enumerate(records, start=1)
         )
-        return ParsedDataset(rows=rows, column_mapping=mapping)
+        return ParsedDataset(rows=rows, column_mapping=_with_formats(mapping, normalisations))
+
+
+def _row(position: int, record: dict[str, str], normalised: dict[str, str]) -> RawTransactionRow:
+    original = {f: record[f] for f, value in normalised.items() if value != record[f]}
+    return RawTransactionRow(
+        row_number=position, **{**record, **normalised}, original_values=original
+    )
+
+
+def _with_formats(
+    mapping: ColumnMapping, normalisations: dict[str, Normalisation]
+) -> ColumnMapping:
+    matches = tuple(
+        match.model_copy(
+            update={
+                "value_format": normalisations[match.field].format_label,
+                "format_ambiguous": normalisations[match.field].ambiguous,
+            }
+        )
+        if match.field in normalisations
+        else match
+        for match in mapping.matches
+    )
+    return mapping.model_copy(update={"matches": matches})
 
 
 def _sniff_delimiter(text: str) -> str:
