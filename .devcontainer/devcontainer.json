@@ -1,0 +1,28 @@
+{
+  "name": "LedgerSystem",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "containerEnv": {
+    // Codespaces sirve el puerto 8000 en https://<codespace>-8000.app.github.dev
+    "DJANGO_ALLOWED_HOSTS": "localhost,127.0.0.1,.app.github.dev"
+  },
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends jq && pip install -r requirements-dev.txt",
+  "postStartCommand": "docker compose up -d --build --wait --wait-timeout 180",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "LedgerSystem API",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "codespaces": {
+      "openFiles": ["README.md"]
+    },
+    "vscode": {
+      "extensions": ["ms-python.python", "charliermarsh.ruff"]
+    }
+  }
+}
