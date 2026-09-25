@@ -1,0 +1,40 @@
+{% extends "web/base.html" %}
+{% load ledger_ui %}
+{% block title %}Lotes{% endblock %}
+{% block content %}
+<h1>Lotes de transacciones</h1>
+<nav class="filters" aria-label="Filtrar por estado">
+  <a href="{% url 'web:batch-list' %}" class="{% if not selected %}active{% endif %}">
+    <span class="badge">Todos · {{ total }}</span>
+  </a>
+  {% for value, label, count in filters %}
+    <a href="?status={{ value }}" class="{% if selected == value %}active{% endif %}">
+      <span class="badge {{ value }}">{{ label }} · {{ count }}</span>
+    </a>
+  {% endfor %}
+</nav>
+<div class="card table-scroll">
+  {% if batches %}
+    <table>
+      <thead>
+        <tr><th>Referencia</th><th>Estado</th><th class="num">Filas</th><th>Subido por</th><th>Fecha</th><th>Decidido por</th></tr>
+      </thead>
+      <tbody>
+        {% for b in batches %}
+          <tr>
+            <td><a href="{% url 'web:batch-detail' b.id %}">{{ b.reference }}</a></td>
+            <td><span class="badge {{ b.status }}">{{ b.status|label:status_labels }}</span></td>
+            <td class="num">{{ b.row_count }}</td>
+            <td>{{ b.created_by }}</td>
+            <td>{{ b.created_at|date:"d/m/Y H:i" }}</td>
+            <td>{{ b.decided_by|default:"—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No hay lotes{% if selected %} en este estado{% endif %}.
+      <a href="{% url 'web:batch-upload' %}">Sube el primero</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -24,6 +24,7 @@ from django.db import transaction
 
 from ledger.application.dtos import (
     ApproveBatchCommand,
+    BatchDetailDTO,
     BatchDTO,
     RegisterBatchCommand,
     RejectBatchCommand,
@@ -49,16 +50,19 @@ class BatchService:
         self._clock = clock
 
     def register_batch(self, command: RegisterBatchCommand) -> BatchDTO:
-        rows = self._parser.parse(command.content)
+        dataset = self._parser.parse(command.content)
         batch = Batch.register(
             reference=command.reference,
             created_by=command.submitted_by,
-            rows=rows,
+            rows=dataset.rows,
+            column_mapping=dataset.column_mapping,
             now=self._clock(),
         )
         with transaction.atomic():
             self._repository.add(batch)
-        logger.info("batch.registered", extra={"batch_id": str(batch.id), "rows": len(rows)})
+        logger.info(
+            "batch.registered", extra={"batch_id": str(batch.id), "rows": len(dataset.rows)}
+        )
         return BatchDTO.from_entity(batch)
 
     def process_batch(self, batch_id: UUID) -> BatchDTO:
@@ -109,6 +113,9 @@ class BatchService:
 
     def get_batch(self, batch_id: UUID) -> BatchDTO:
         return BatchDTO.from_entity(self._repository.get(batch_id))
+
+    def get_batch_detail(self, batch_id: UUID) -> BatchDetailDTO:
+        return BatchDetailDTO.from_entity(self._repository.get(batch_id))
 
     def list_batches(self, limit: int = 50) -> list[BatchDTO]:
         return [BatchDTO.from_entity(b) for b in self._repository.list_recent(limit)]

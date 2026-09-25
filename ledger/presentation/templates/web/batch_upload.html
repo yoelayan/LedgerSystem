@@ -1,0 +1,36 @@
+{% extends "web/base.html" %}
+{% block title %}Subir CSV{% endblock %}
+{% block content %}
+<h1>Subir un lote</h1>
+<div class="grid">
+  <div class="card">
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <p>
+        <label for="{{ form.reference.id_for_label }}">Referencia</label>
+        <input type="text" name="reference" id="{{ form.reference.id_for_label }}" maxlength="120"
+               placeholder="p. ej. nóminas septiembre" required value="{{ form.reference.value|default_if_none:'' }}">
+        {{ form.reference.errors }}
+      </p>
+      <p>
+        <label for="{{ form.file.id_for_label }}">Archivo CSV (máx. 5 MB, 10.000 filas)</label>
+        <input type="file" name="file" id="{{ form.file.id_for_label }}" accept=".csv,text/csv" required>
+        {{ form.file.errors }}
+      </p>
+      <button class="btn primary" type="submit">Subir y analizar</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>¿Qué columnas necesita?</h2>
+    <p class="muted">Los nombres de las columnas no tienen que coincidir: el sistema reconoce
+      cabeceras en español o inglés, abreviaturas y errores de escritura, y se fija en los valores
+      (divisas ISO, IBAN, fechas…). Verás qué columna usó para cada campo.</p>
+    <ul>
+      {% for key, label in fields.items %}<li>{{ label }} <span class="muted">(<code>{{ key }}</code>)</span></li>{% endfor %}
+    </ul>
+    <p class="muted">Separador <code>,</code> <code>;</code> tabulador o <code>|</code>, en UTF-8.
+      Importes con punto decimal (<code>1250.50</code>) y fechas <code>AAAA-MM-DD</code>.</p>
+  </div>
+</div>
+{% endblock %}

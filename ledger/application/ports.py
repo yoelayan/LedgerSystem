@@ -6,7 +6,7 @@ from typing import Protocol
 from uuid import UUID
 
 from ledger.domain.entities import Batch
-from ledger.domain.value_objects import AnalysisReport, RawTransactionRow
+from ledger.domain.value_objects import AnalysisReport, ParsedDataset, RawTransactionRow
 
 Clock = Callable[[], datetime]
 
@@ -31,8 +31,11 @@ class BatchRepository(Protocol):
 
 
 class DatasetParser(Protocol):
-    def parse(self, content: bytes) -> list[RawTransactionRow]:
-        """Raises MalformedDatasetError / EmptyBatchError / BatchTooLargeError."""
+    def parse(self, content: bytes) -> ParsedDataset:
+        """Identify the columns and read the rows.
+
+        Raises MalformedDatasetError / EmptyBatchError / BatchTooLargeError.
+        """
         ...
 
 

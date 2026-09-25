@@ -40,6 +40,51 @@ class RawTransactionRow(BaseModel):
     value_date: str
 
 
+class MatchMethod(StrEnum):
+    """How a dataset column was identified as a canonical field."""
+
+    EXACT = "EXACT"  # the header is the canonical name
+    VOCABULARY = "VOCABULARY"  # the header is a known name for the field ("importe", "moneda")
+    SIMILARITY = "SIMILARITY"  # the header resembles a known name ("Importe neto (EUR)")
+    CONTENT = "CONTENT"  # inferred from the values (ISO currencies, IBANs, dates...)
+
+
+class ColumnMatch(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    field: str
+    source_column: str
+    method: MatchMethod
+    confidence: float = Field(ge=0, le=1)
+
+
+class ColumnMapping(BaseModel):
+    """Which column of the uploaded file feeds each canonical field, and why.
+
+    Kept on the batch so that approvers can see (and distrust) automatic guesses.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    matches: tuple[ColumnMatch, ...] = ()
+    ignored_columns: tuple[str, ...] = ()
+
+    def column_for(self, field: str) -> str | None:
+        return next((m.source_column for m in self.matches if m.field == field), None)
+
+    @property
+    def missing_fields(self) -> tuple[str, ...]:
+        mapped = {m.field for m in self.matches}
+        return tuple(f for f in REQUIRED_COLUMNS if f not in mapped)
+
+
+class ParsedDataset(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rows: tuple[RawTransactionRow, ...]
+    column_mapping: ColumnMapping
+
+
 class Severity(StrEnum):
     ERROR = "ERROR"  # blocks the batch: it is rejected automatically
     WARNING = "WARNING"  # informative: surfaced to the approver

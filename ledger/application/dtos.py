@@ -7,7 +7,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from ledger.domain.entities import Batch
-from ledger.domain.value_objects import ActorId, AnalysisReport, BatchStatus
+from ledger.domain.value_objects import (
+    ActorId,
+    AnalysisReport,
+    BatchStatus,
+    ColumnMapping,
+    RawTransactionRow,
+)
 
 _COMMAND_CONFIG = ConfigDict(frozen=True, extra="forbid")
 
@@ -47,6 +53,7 @@ class BatchDTO(BaseModel):
     created_by: str
     created_at: datetime
     row_count: int
+    column_mapping: ColumnMapping | None
     analysis: AnalysisReport | None
     decided_by: str | None
     decided_at: datetime | None
@@ -61,8 +68,19 @@ class BatchDTO(BaseModel):
             created_by=batch.created_by,
             created_at=batch.created_at,
             row_count=len(batch.rows),
+            column_mapping=batch.column_mapping,
             analysis=batch.analysis,
             decided_by=batch.decided_by,
             decided_at=batch.decided_at,
             rejection_reason=batch.rejection_reason,
         )
+
+
+class BatchDetailDTO(BatchDTO):
+    """A batch plus its source rows, for screens that show the data itself."""
+
+    rows: tuple[RawTransactionRow, ...]
+
+    @classmethod
+    def from_entity(cls, batch: Batch) -> Self:
+        return cls.model_validate({**BatchDTO.from_entity(batch).model_dump(), "rows": batch.rows})

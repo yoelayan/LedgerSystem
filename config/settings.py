@@ -29,16 +29,55 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# Behind a TLS-terminating proxy (GitHub Codespaces, a PaaS...) the browser's Origin is
+# https://..., so Django's CSRF check needs to know which external origins are ours.
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 INSTALLED_APPS = [
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
     "ledger.infrastructure.apps.LedgerInfrastructureConfig",
     "ledger.presentation.apps.LedgerPresentationConfig",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "ledger.presentation.api.middleware.DomainExceptionMiddleware",
 ]
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+LOGIN_URL = "web:login"
+LOGIN_REDIRECT_URL = "web:batch-list"
+LOGOUT_REDIRECT_URL = "web:login"
+
+# Demo accounts created by `manage.py create_demo_users` and listed on the login page.
+DEMO_USERS = [] if ENVIRONMENT == "production" else ["alice", "bob", "carol"]
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"

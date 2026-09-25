@@ -9,7 +9,7 @@
 
 Proyecto de referencia que muestra cómo construir un servicio financiero **correcto bajo concurrencia**, con **DDD pragmático**, **errores explícitos** y **fail-fast**, usando Django como API REST, Pydantic v2, pandas y python-statemachine.
 
-Un usuario sube un CSV de transacciones. El sistema lo analiza con pandas (importes, duplicados, divisas, fechas y anomalías estadísticas) y lo lleva por un ciclo de vida controlado por una máquina de estados hasta que un **segundo** usuario lo aprueba o lo rechaza.
+Un usuario sube un CSV de transacciones desde la **web** (o la API). Un pequeño **modelo de vectores entrenado localmente** identifica qué columna es cada campo, aunque se llamen distinto ("Importe", "Nº de cuenta", "Fecha valor"…). El sistema lo analiza con pandas (importes, duplicados, divisas, fechas y anomalías estadísticas) y lo lleva por un ciclo de vida controlado por una máquina de estados hasta que un **segundo** usuario lo aprueba o lo rechaza.
 
 ---
 
@@ -20,7 +20,9 @@ Un usuario sube un CSV de transacciones. El sistema lo analiza con pandas (impor
 3. [Diseño de excepciones](#3-diseño-de-excepciones)
 4. [Concurrencia y consistencia](#4-concurrencia-y-consistencia)
 5. [Análisis de datos con pandas](#5-análisis-de-datos-con-pandas)
+   - [Identificación de columnas](#identificación-de-columnas-modelo-de-vectores)
 6. [Ejecución con Docker](#6-ejecución-con-docker)
+   - [Frontend web](#frontend-web)
 7. [API](#7-api)
 8. [Tests y CI](#8-tests-y-ci)
 9. [Decisiones y trade-offs](#9-decisiones-y-trade-offs)
@@ -108,11 +110,15 @@ ledger/
 │   ├── models.py           # ORM solo para persistencia + CHECK constraints
 │   ├── repositories.py     # DjangoBatchRepository + mapeo entidad <-> modelo
 │   ├── migrations/
-│   └── analysis/           # Adaptadores pandas (parser CSV + analizador)
+│   └── analysis/           # Parser CSV, identificación de columnas y analizador pandas
+│       ├── column_mapping.py        # Modelo TF-IDF + perfilado de valores
+│       └── column_vocabulary.json   # Datos de entrenamiento: nombres conocidos por campo
 └── presentation/
     ├── composition.py      # Composition root (único sitio que conoce adaptadores)
     ├── api/                # Views, URLs, middleware de errores, problem+json
-    └── management/commands/simulate_concurrent_approval.py
+    ├── web/                # Frontend: login, listado, subida, detalle, aprobar/rechazar
+    ├── templates/          # Plantillas Django (HTML + CSS en línea, sin build)
+    └── management/commands/  # simulate_concurrent_approval, create_demo_users
 ```
 
 La dirección de las dependencias es siempre hacia dentro y **se verifica con tests** (`tests/architecture/test_layers.py`, que analiza los imports con `ast`). Si alguien importa Django o pandas desde el dominio, CI falla.
@@ -219,7 +225,7 @@ docker compose exec web python manage.py simulate_concurrent_approval
 
 ## 5. Análisis de datos con pandas
 
-`PandasCsvParser` rechaza solo problemas **estructurales**: el archivo no es UTF-8, no es un CSV válido, faltan columnas, está vacío o es demasiado grande. Los valores se guardan en crudo para que el análisis pueda **informar de todos los errores**, no solo del primero.
+`PandasCsvParser` rechaza solo problemas **estructurales**: el archivo no es UTF-8, no es un CSV válido, no se pueden identificar las columnas, está vacío o es demasiado grande. Detecta el separador (`,` `;` tabulador `|`) y acepta el BOM que añade Excel. Los valores se guardan en crudo para que el análisis pueda **informar de todos los errores**, no solo del primero.
 
 `PandasTransactionAnalyzer` aplica reglas vectorizadas:
 
@@ -239,6 +245,28 @@ docker compose exec web python manage.py simulate_concurrent_approval
 - Las anomalías se detectan con la **puntuación z robusta** (mediana/MAD, Iglewicz & Hoaglin). Con la z clásica, un único importe enorme infla la desviación típica y queda enmascarado. Solo se calcula sobre filas válidas y por divisa.
 - **El dinero se suma con `Decimal`**, nunca con `float`. Los floats se usan únicamente para la estadística.
 
+### Identificación de columnas (modelo de vectores)
+
+Los archivos reales casi nunca traen nuestras cabeceras. `VectorColumnMapper` (`ledger/infrastructure/analysis/column_mapping.py`) decide qué columna alimenta cada campo **sin servicios externos ni coste por uso**. Combina dos señales:
+
+1. **Nombre de la cabecera: un modelo entrenado.** `HeaderClassifier` se entrena al arrancar con [`column_vocabulary.json`](ledger/infrastructure/analysis/column_vocabulary.json), una lista de nombres posibles por campo en español e inglés. Convierte cada cabecera en un vector TF-IDF de n-gramas de caracteres (scikit-learn) y busca la cabecera conocida más cercana por similitud coseno. Los n-gramas le permiten reconocer variantes que nunca vio: `Importe neto (EUR)`, `Fcha valor`, `Divsa`. Antes se normaliza: Unidecode quita los acentos y se ignoran mayúsculas y puntuación.
+2. **Valores: perfilado de contenido.** Mira una muestra de los valores: códigos ISO 4217 (pycountry) → divisa, IBAN válidos (schwifty) → cuenta, fechas interpretables (python-dateutil) → fecha valor, decimales → importe, códigos únicos → ID. Así, incluso `col1…col5` se asignan bien.
+
+| Cómo se identificó | Confianza | Ejemplo |
+|---|---|---|
+| `EXACT` | 100 % | `amount` |
+| `VOCABULARY` (está en la lista) | 95–100 % | `Moneda`, `Nº de cuenta` |
+| `SIMILARITY` (se parece a uno de la lista) | 0,9 × similitud | `Importe neto (EUR)`, `Fcha valor` |
+| `CONTENT` (solo por los valores) | ≤ 70 % | `col3` con `1250.50`, `980.00`… |
+
+Las columnas se asignan de mayor a menor puntuación; cada columna alimenta un solo campo. Una columna sin nada reconocible (`Descripcion`) se ignora en vez de forzarla. Si falta algún campo, el lote no se registra y el error dice qué columnas se encontraron.
+
+El resultado se **guarda con el lote y se muestra al aprobador**: qué columna se usó, cómo se identificó y con qué confianza. En un sistema que mueve dinero, una suposición automática tiene que ser visible.
+
+**Para enseñarle una cabecera nueva**, añádela a `column_vocabulary.json`; no hace falta tocar código. Del vocabulario se excluyeron a propósito términos como `saldo`, `debe`/`haber` o `precio`: se parecen a un importe, pero no son el importe de la transacción.
+
+> Los **valores** todavía tienen que venir en el formato canónico: importes con punto decimal (`1250.50`) y fechas `AAAA-MM-DD`. Un archivo con `1.250,50` o `01/09/2026` se identifica bien, pero el análisis marcará esas filas como error. Normalizar formatos locales es el siguiente paso natural.
+
 ## 6. Ejecución con Docker
 
 Requisitos: Docker con Compose v2.
@@ -247,7 +275,7 @@ Requisitos: Docker con Compose v2.
 docker compose up --build
 ```
 
-Esto levanta PostgreSQL 16 y la API (gunicorn) en `http://localhost:8000`, aplica las migraciones y espera a que la BD esté sana. Para cambiar la configuración copia `.env.example` a `.env`.
+Esto levanta PostgreSQL 16 y la aplicación (gunicorn) en `http://localhost:8000`. Aplica las migraciones, crea los usuarios de demo y espera a que la BD esté sana. Para cambiar la configuración copia `.env.example` a `.env`.
 
 Prueba rápida (requiere `curl` y `jq`; en Windows funciona desde Git Bash):
 
@@ -255,14 +283,26 @@ Prueba rápida (requiere `curl` y `jq`; en Windows funciona desde Git Bash):
 bash scripts/smoke_test.sh
 ```
 
+### Frontend web
+
+Abre `http://localhost:8000` y entra con uno de los usuarios de demo: `alice`, `bob` o `carol`, con contraseña `demo1234` (configurable con `DEMO_USERS_PASSWORD`; en `DJANGO_ENV=production` no se crean).
+
+- **Lotes**: listado con filtro por estado.
+- **Subir CSV**: sube el archivo y lo analiza al momento. Prueba con `samples/banco_es.csv`, que usa `;` y cabeceras en español.
+- **Detalle**: resumen y totales por divisa, las **columnas identificadas** con su confianza, los problemas encontrados y las transacciones (filas con error o aviso resaltadas).
+- **Aprobar / Rechazar**: el actor es siempre el usuario con sesión iniciada. Quien sube un lote no puede aprobarlo (el botón aparece desactivado y el dominio lo rechaza igualmente). Rechazar exige motivo.
+
+Son plantillas Django renderizadas en el servidor, con CSS en línea: no hay paso de build ni dependencias de frontend. Usan los mismos casos de uso que la API.
+
 ### Probarlo en GitHub Codespaces (sin instalar nada)
 
 El repo incluye un `.devcontainer/`, así que puedes tener un entorno funcionando directamente en GitHub:
 
 1. Pulsa el botón **Open in GitHub Codespaces** de arriba (o *Code → Codespaces → Create codespace*).
-2. Al arrancar, el codespace ejecuta `docker compose up` solo: PostgreSQL + API ya migrada en el puerto `8000`.
-3. En la pestaña **Ports** tienes la URL pública de la API (`https://<tu-codespace>-8000.app.github.dev/api/v1/health/`). Si quieres llamarla desde fuera del navegador (Postman, curl en tu máquina), cambia la visibilidad del puerto a *Public*.
-4. Desde la terminal del codespace puedes lanzar todo tal cual:
+2. Al arrancar, el codespace ejecuta `docker compose up` solo: PostgreSQL + la aplicación ya migrada en el puerto `8000`. La primera vez tarda unos minutos porque construye las imágenes.
+3. Se abre el navegador con la web (si no, pestaña **Ports** → puerto 8000). Entra con `alice` / `demo1234`, sube `samples/banco_es.csv` y apruébalo después como `bob`.
+4. La API está en la misma URL, bajo `/api/v1/`. Para llamarla desde fuera del navegador (Postman, curl en tu máquina), cambia la visibilidad del puerto a *Public*.
+5. Desde la terminal del codespace puedes lanzar todo tal cual:
 
 ```bash
 bash scripts/smoke_test.sh
@@ -272,7 +312,7 @@ docker compose --profile test run --rm tests
 
 ## 7. API
 
-Base: `/api/v1`. No incluye autenticación (fuera del alcance de la demo): el actor se envía explícitamente en el payload.
+Base: `/api/v1`. La API no incluye autenticación (fuera del alcance de la demo): el actor se envía explícitamente en el payload. El login protege el frontend web. Proteger también la API, con tokens o sesión, es un cambio pendiente si esto se expone.
 
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
@@ -284,7 +324,7 @@ Base: `/api/v1`. No incluye autenticación (fuera del alcance de la demo): el ac
 | `POST` | `/batches/{id}/approve/` | `{"approver": "bob"}` | `200` / `400` / `409` |
 | `POST` | `/batches/{id}/reject/` | `{"reviewer": "bob", "reason": "..."}` | `200` / `400` / `409` |
 
-Formato del CSV (ver `samples/`):
+Formato del CSV (ver `samples/`). Las cabeceras pueden llamarse distinto: ver [Identificación de columnas](#identificación-de-columnas-modelo-de-vectores). La respuesta incluye `column_mapping` con la columna elegida para cada campo.
 
 ```csv
 external_id,account,amount,currency,value_date
@@ -310,9 +350,9 @@ curl -H "Content-Type: application/json" -d '{"approver":"bob"}' http://localhos
 ```
 tests/
 ├── unit/domain/          # máquina de estados, transiciones válidas/inválidas, guards, excepciones
-├── unit/infrastructure/  # parser CSV y analizador pandas (sin BD)
+├── unit/infrastructure/  # parser CSV, identificación de columnas y analizador pandas (sin BD)
 ├── unit/test_middleware.py
-├── integration/          # casos de uso, repositorio, constraints, API y concurrencia (PostgreSQL)
+├── integration/          # casos de uso, repositorio, constraints, API, web y concurrencia (PostgreSQL)
 └── architecture/         # reglas de dependencias entre capas
 ```
 
