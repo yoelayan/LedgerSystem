@@ -19,8 +19,8 @@ import pandas as pd
 
 from ledger.domain.exceptions import BatchTooLargeError, EmptyBatchError, MalformedDatasetError
 from ledger.domain.value_objects import (
+    DATASET_FIELDS,
     MAX_ROWS_PER_BATCH,
-    REQUIRED_COLUMNS,
     ColumnMapping,
     ParsedDataset,
     RawTransactionRow,
@@ -30,6 +30,7 @@ from ledger.infrastructure.analysis.column_mapping import (
     ColumnMapper,
     VectorColumnMapper,
 )
+from ledger.infrastructure.analysis.directions import resolve_directions
 from ledger.infrastructure.analysis.value_normalization import (
     Normalisation,
     normalise_amounts,
@@ -44,7 +45,7 @@ class PandasCsvParser:
     def __init__(self, mapper: ColumnMapper | None = None) -> None:
         self._mapper = mapper or VectorColumnMapper()
 
-    def parse(self, content: bytes) -> ParsedDataset:
+    def parse(self, content: bytes, *, signed_amounts: bool = False) -> ParsedDataset:
         if not content.strip():
             raise EmptyBatchError()
         try:
@@ -82,22 +83,42 @@ class PandasCsvParser:
         if len(frame) > MAX_ROWS_PER_BATCH:
             raise BatchTooLargeError(len(frame), MAX_ROWS_PER_BATCH)
 
-        selected = frame[[mapping.column_for(field) for field in REQUIRED_COLUMNS]]
-        selected.columns = list(REQUIRED_COLUMNS)
+        fields = [f for f in DATASET_FIELDS if mapping.column_for(f) is not None]
+        selected = frame[[mapping.column_for(field) for field in fields]]
+        selected.columns = fields
         records = selected.to_dict(orient="records")
         normalisations = {
             "amount": normalise_amounts([r["amount"] for r in records]),
             "value_date": normalise_dates([r["value_date"] for r in records]),
         }
+        directions = resolve_directions(
+            normalisations["amount"].values,
+            [r["direction"] for r in records] if "direction" in fields else None,
+            signed_amounts=signed_amounts,
+        )
         rows = tuple(
-            _row(position, record, {f: n.values[position - 1] for f, n in normalisations.items()})
+            _row(
+                position,
+                record,
+                {
+                    "amount": directions.amounts[position - 1],
+                    "value_date": normalisations["value_date"].values[position - 1],
+                    "direction": directions.directions[position - 1],
+                },
+            )
             for position, record in enumerate(records, start=1)
         )
-        return ParsedDataset(rows=rows, column_mapping=_with_formats(mapping, normalisations))
+        mapping = _with_formats(mapping, normalisations).model_copy(
+            update={"direction_source": directions.source}
+        )
+        return ParsedDataset(rows=rows, column_mapping=mapping)
 
 
 def _row(position: int, record: dict[str, str], normalised: dict[str, str]) -> RawTransactionRow:
-    original = {f: record[f] for f, value in normalised.items() if value != record[f]}
+    # A direction that did not come from the file (sign or default) has no original value.
+    original = {
+        f: record[f] for f, value in normalised.items() if f in record and value != record[f]
+    }
     return RawTransactionRow(
         row_number=position, **{**record, **normalised}, original_values=original
     )

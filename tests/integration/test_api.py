@@ -67,6 +67,16 @@ def test_full_lifecycle(client: Client) -> None:
     assert [b["id"] for b in client.get(f"{BASE}/batches/").json()["items"]] == [batch_id]
 
 
+def test_signed_amounts_and_direction_split(client: Client) -> None:
+    content = b"external_id,account,amount,currency,value_date\nTX-1,A,-10.00,USD,2026-09-01\n"
+    batch_id = _upload(client, content=content, signed_amounts="true").json()["id"]
+
+    processed = client.post(f"{BASE}/batches/{batch_id}/process/").json()
+
+    assert processed["column_mapping"]["direction_source"] == "SIGNED_AMOUNTS"
+    assert processed["analysis"]["outflow_by_currency"] == {"USD": "10.00"}
+
+
 def test_reject(client: Client) -> None:
     batch_id = _pending(client)
 

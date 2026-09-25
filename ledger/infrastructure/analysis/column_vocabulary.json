@@ -117,5 +117,27 @@
     "fecha liquidacion",
     "dia",
     "day"
+  ],
+  "direction": [
+    "direction",
+    "tipo",
+    "tipo movimiento",
+    "tipo de movimiento",
+    "tipo operacion",
+    "tipo de operacion",
+    "naturaleza",
+    "sentido",
+    "movement type",
+    "transaction type",
+    "type",
+    "ingreso egreso",
+    "ingreso o egreso",
+    "entrada salida",
+    "cargo abono",
+    "debito credito",
+    "debit credit",
+    "dc",
+    "signo",
+    "in out"
   ]
 }

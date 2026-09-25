@@ -50,7 +50,7 @@ class BatchService:
         self._clock = clock
 
     def register_batch(self, command: RegisterBatchCommand) -> BatchDTO:
-        dataset = self._parser.parse(command.content)
+        dataset = self._parser.parse(command.content, signed_amounts=command.signed_amounts)
         batch = Batch.register(
             reference=command.reference,
             created_by=command.submitted_by,

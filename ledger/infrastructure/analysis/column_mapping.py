@@ -37,11 +37,12 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from unidecode import unidecode
 
 from ledger.domain.value_objects import (
-    REQUIRED_COLUMNS,
+    DATASET_FIELDS,
     ColumnMapping,
     ColumnMatch,
     MatchMethod,
 )
+from ledger.infrastructure.analysis.directions import direction_share
 
 VOCABULARY_PATH: Final = Path(__file__).with_name("column_vocabulary.json")
 
@@ -83,10 +84,11 @@ class HeaderClassifier:
     """Nearest-neighbour classifier over TF-IDF character n-gram vectors."""
 
     def __init__(self, vocabulary: Mapping[str, Sequence[str]]) -> None:
+        # Every field is also known by its own canonical name.
         examples = {
             (normalise_header(header), field)
-            for field in REQUIRED_COLUMNS
-            for header in (field, *vocabulary.get(field, ()))
+            for field, headers in vocabulary.items()
+            for header in (field, *headers)
         }
         self._headers, self._fields = zip(*sorted(examples), strict=True)
         # char_wb: n-grams inside word boundaries, so word order and extra words matter less.
@@ -96,7 +98,7 @@ class HeaderClassifier:
     @classmethod
     def from_file(cls, path: Path = VOCABULARY_PATH) -> "HeaderClassifier":
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return cls({field: raw.get(field, []) for field in REQUIRED_COLUMNS})
+        return cls({field: headers for field, headers in raw.items() if not field.startswith("_")})
 
     def predict(self, header: str) -> dict[str, HeaderPrediction]:
         """Best match per field for `header`."""
@@ -127,20 +129,28 @@ class _Candidate:
 
 
 class VectorColumnMapper:
-    def __init__(self, classifier: HeaderClassifier | None = None) -> None:
+    """Assigns columns to `fields`; which of them are mandatory is the caller's business."""
+
+    def __init__(
+        self,
+        classifier: HeaderClassifier | None = None,
+        fields: Sequence[str] = DATASET_FIELDS,
+    ) -> None:
         self._classifier = classifier or default_classifier()
+        self._fields = tuple(fields)
 
     def map(self, columns: Sequence[str], samples: Mapping[str, Sequence[str]]) -> ColumnMapping:
         candidates: list[_Candidate] = []
         for column in columns:
             predictions = self._classifier.predict(column)
-            for field in REQUIRED_COLUMNS:
-                candidate = _score(field, column, predictions[field], samples.get(column, ()))
+            for field in self._fields:
+                prediction = predictions.get(field, HeaderPrediction(field, 0.0, ""))
+                candidate = _score(field, column, prediction, samples.get(column, ()))
                 if candidate is not None:
                     candidates.append(candidate)
         # Best score first; ties keep the canonical field order and the file's column order.
         candidates.sort(
-            key=lambda c: (-c.score, REQUIRED_COLUMNS.index(c.field), columns.index(c.column))
+            key=lambda c: (-c.score, self._fields.index(c.field), columns.index(c.column))
         )
         matches: dict[str, ColumnMatch] = {}
         used: set[str] = set()
@@ -152,7 +162,7 @@ class VectorColumnMapper:
             )
             used.add(c.column)
         return ColumnMapping(
-            matches=tuple(matches[f] for f in REQUIRED_COLUMNS if f in matches),
+            matches=tuple(matches[f] for f in self._fields if f in matches),
             ignored_columns=tuple(c for c in columns if c not in used),
         )
 
@@ -195,10 +205,14 @@ def _content_score(field: str, raw_values: Sequence[str]) -> float:
         return float(numeric.mean() * (0.5 + 0.5 * with_decimals.mean()))
     if field == "value_date":
         return float(series.map(_looks_like_date).mean())
+    if field == "direction":
+        return direction_share(values)
     if field == "account":
         ibans = series.map(_is_iban).mean()
         codes = series.str.contains(_HAS_DIGIT) & (series.str.len() >= 6)
         return float(max(ibans, 0.6 * codes.mean()))
+    if field != "external_id":
+        return 0.0  # no value-based evidence for this field: only its name counts
     # external_id: unique, and codes rather than plain words or amounts.
     unique_ratio = series.nunique() / len(series)
     codes = series.str.contains(_HAS_DIGIT) & ~series.str.match(_DECIMAL)

@@ -156,3 +156,35 @@ def test_canonical_files_are_not_rewritten() -> None:
 
     assert all(row.original_values == {} for row in dataset.rows)
     assert all(m.value_format is None for m in dataset.column_mapping.matches)
+
+
+def test_direction_column_is_identified_and_normalised() -> None:
+    content = (
+        b"Referencia;Cuenta;Importe;Moneda;Fecha;Tipo de movimiento\n"
+        b"OP-1;ACC-1;1.250,50;EUR;01/09/2026;Abono\n"
+        b"OP-2;ACC-1;-80,00;EUR;15/09/2026;Cargo\n"
+    )
+
+    dataset = parser.parse(content)
+
+    first, second = dataset.rows
+    assert (first.direction, first.original_values["direction"]) == ("INFLOW", "Abono")
+    assert (second.direction, second.amount) == ("OUTFLOW", "80.00")
+    assert dataset.column_mapping.column_for("direction") == "Tipo de movimiento"
+    assert dataset.column_mapping.direction_source == "COLUMN"
+
+
+def test_signed_amounts_on_request() -> None:
+    content = csv_bytes("TX-1,ACC-1,-10.00,USD,2026-09-01", "TX-2,ACC-2,15.00,USD,2026-09-02")
+
+    rows = parser.parse(content, signed_amounts=True).rows
+
+    assert [(r.amount, r.direction) for r in rows] == [("10.00", "OUTFLOW"), ("15.00", "INFLOW")]
+    assert "direction" not in rows[0].original_values  # it did not come from the file
+
+
+def test_batches_without_direction_are_payments() -> None:
+    dataset = parser.parse(CLEAN_CSV)
+
+    assert {r.direction for r in dataset.rows} == {"OUTFLOW"}
+    assert dataset.column_mapping.direction_source == "DEFAULT"

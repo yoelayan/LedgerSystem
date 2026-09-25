@@ -31,8 +31,10 @@ class BatchRepository(Protocol):
 
 
 class DatasetParser(Protocol):
-    def parse(self, content: bytes) -> ParsedDataset:
+    def parse(self, content: bytes, *, signed_amounts: bool = False) -> ParsedDataset:
         """Identify the columns and read the rows.
+
+        `signed_amounts`: the uploader declares that negative amounts are outflows.
 
         Raises MalformedDatasetError / EmptyBatchError / BatchTooLargeError.
         """

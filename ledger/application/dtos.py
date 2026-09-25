@@ -26,6 +26,8 @@ class RegisterBatchCommand(BaseModel):
     ]
     submitted_by: ActorId
     content: bytes = Field(repr=False)
+    # Declared by the uploader: negative amounts are outflows, positive ones inflows.
+    signed_amounts: bool = False
 
 
 class ApproveBatchCommand(BaseModel):

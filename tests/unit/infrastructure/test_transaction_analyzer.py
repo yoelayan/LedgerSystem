@@ -120,3 +120,28 @@ def test_invalid_rows_do_not_distort_outlier_statistics() -> None:
     rows.append(make_row(6, amount="-999999.00"))
 
     assert _codes(rows) == [(6, IssueCode.NON_POSITIVE_AMOUNT)]
+
+
+def test_unrecognised_direction_blocks() -> None:
+    assert _codes([make_row(1, direction="Nómina")]) == [(1, IssueCode.INVALID_DIRECTION)]
+
+
+def test_totals_are_split_into_inflows_and_outflows() -> None:
+    report = analyzer.analyze(
+        [
+            make_row(1, amount="100.00", direction="INFLOW"),
+            make_row(2, amount="30.00", direction="OUTFLOW"),
+            make_row(3, amount="20.00", direction="OUTFLOW", currency="EUR"),
+        ]
+    )
+
+    assert report.totals_by_currency == {"USD": Decimal("130.00"), "EUR": Decimal("20.00")}
+    assert report.inflow_by_currency == {"USD": Decimal("100.00")}
+    assert report.outflow_by_currency == {"USD": Decimal("30.00"), "EUR": Decimal("20.00")}
+
+
+def test_outliers_compare_inflows_with_inflows_only() -> None:
+    payments = [make_row(i, amount="100.00") for i in range(1, 7)]
+    collection = make_row(7, amount="90000.00", direction="INFLOW")
+
+    assert _codes([*payments, collection]) == []

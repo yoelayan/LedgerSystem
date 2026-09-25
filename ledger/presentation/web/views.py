@@ -10,6 +10,7 @@ else still propagates and becomes a logged 500.
 
 from collections import Counter
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Final
 from uuid import UUID
 
@@ -30,7 +31,15 @@ from ledger.application.dtos import (
     RejectBatchCommand,
 )
 from ledger.domain.exceptions import DomainError
-from ledger.domain.value_objects import BatchStatus, IssueCode, MatchMethod, Severity
+from ledger.domain.value_objects import (
+    AnalysisReport,
+    BatchStatus,
+    Direction,
+    DirectionSource,
+    IssueCode,
+    MatchMethod,
+    Severity,
+)
 from ledger.presentation.composition import build_batch_service
 
 MAX_UPLOAD_BYTES: Final = 5 * 1024 * 1024
@@ -49,6 +58,13 @@ FIELD_LABELS: Final = {
     "amount": "Importe",
     "currency": "Divisa",
     "value_date": "Fecha valor",
+    "direction": "Tipo (ingreso/egreso)",
+}
+DIRECTION_LABELS: Final = {Direction.INFLOW: "Ingreso", Direction.OUTFLOW: "Egreso"}
+DIRECTION_SOURCE_LABELS: Final = {
+    DirectionSource.COLUMN: "Columna del archivo",
+    DirectionSource.SIGNED_AMOUNTS: "Signo del importe (declarado al subir: negativo = egreso)",
+    DirectionSource.DEFAULT: "Sin columna de tipo: todos son egresos (pagos)",
 }
 METHOD_LABELS: Final = {
     MatchMethod.EXACT: "Nombre exacto",
@@ -65,12 +81,17 @@ ISSUE_LABELS: Final = {
     IssueCode.INVALID_VALUE_DATE: "Fecha inválida",
     IssueCode.DUPLICATE_EXTERNAL_ID: "ID duplicado",
     IssueCode.AMOUNT_OUTLIER: "Importe atípico",
+    IssueCode.INVALID_DIRECTION: "Tipo no reconocido",
 }
 
 
 class UploadForm(forms.Form):
     reference = forms.CharField(label="Referencia", max_length=120)
     file = forms.FileField(label="Archivo CSV")
+    signed_amounts = forms.BooleanField(
+        label="Los importes llevan signo: negativo = egreso, positivo = ingreso",
+        required=False,
+    )
 
     def clean_file(self) -> UploadedFile:
         upload = self.cleaned_data["file"]
@@ -117,6 +138,7 @@ def batch_upload(request: HttpRequest) -> HttpResponse:
                 reference=form.cleaned_data["reference"],
                 submitted_by=request.user.get_username(),
                 content=form.cleaned_data["file"].read(),
+                signed_amounts=form.cleaned_data["signed_amounts"],
             )
         except ValidationError:
             # The form already checks the reference; this is e.g. a username the domain
@@ -163,6 +185,9 @@ def batch_detail(request: HttpRequest, batch_id: UUID) -> HttpResponse:
             "status_labels": _labels(STATUS_LABELS),
             "field_labels": FIELD_LABELS,
             "method_labels": _labels(METHOD_LABELS),
+            "direction_labels": _labels(DIRECTION_LABELS),
+            "direction_source_labels": _labels(DIRECTION_SOURCE_LABELS),
+            "money": _money_by_currency(batch.analysis),
             "issue_labels": _labels(ISSUE_LABELS),
             "is_owner": batch.created_by == request.user.get_username(),
             "can_decide": batch.status is BatchStatus.PENDING_APPROVAL,
@@ -235,6 +260,24 @@ def _describe(error: DomainError) -> str:
             f"Columnas encontradas en el archivo: {found}."
         )
     return _ERROR_MESSAGES.get(error.code, error.message)
+
+
+def _money_by_currency(
+    report: AnalysisReport | None,
+) -> list[tuple[str, Decimal, Decimal, Decimal]]:
+    """(currency, inflows, outflows, net) for the summary table."""
+    if report is None:
+        return []
+    zero = Decimal("0.00")
+    return [
+        (
+            code,
+            report.inflow_by_currency.get(code, zero),
+            report.outflow_by_currency.get(code, zero),
+            report.inflow_by_currency.get(code, zero) - report.outflow_by_currency.get(code, zero),
+        )
+        for code in sorted(report.totals_by_currency)
+    ]
 
 
 def _labels[K](labels: dict[K, str]) -> dict[str, str]:
